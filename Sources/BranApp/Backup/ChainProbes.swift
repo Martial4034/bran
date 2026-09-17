@@ -49,8 +49,9 @@ public enum ChainProbes {
         case .binaryMissing:
             return makeResult(
                 .tailscaleLocal, .down,
-                "Tailscale introuvable : ni « /Applications/Tailscale.app » ni le "
-                    + "binaire Homebrew ne sont présents sur ce Mac. Installer "
+                "Tailscale introuvable : ni son interface locale "
+                    + "(« /Library/Tailscale/ipnport »), ni « /Applications/Tailscale.app », "
+                    + "ni le binaire Homebrew ne sont présents sur ce Mac. Installer "
                     + "Tailscale pour activer la sauvegarde."
             )
         case .timedOut:
@@ -66,6 +67,21 @@ public enum ChainProbes {
                 .tailscaleLocal, .down,
                 "Impossible de lancer « tailscale status » : \(reason).",
                 latency: latency
+            )
+        case .daemonUnreachable(let reason):
+            return makeResult(
+                .tailscaleLocal, .down,
+                "Tailscale ne répond pas sur son interface locale (\(reason)) — "
+                    + "l'application est probablement quittée ou son extension "
+                    + "réseau arrêtée.",
+                raw: reason, latency: latency
+            )
+        case .localAPIRejected(let status, let body):
+            return makeResult(
+                .tailscaleLocal, .down,
+                "L'interface locale de Tailscale a refusé la lecture de l'état "
+                    + "(HTTP \(status)).",
+                raw: body, latency: latency
             )
         case .emptyOutput(let stderrText, let exitCode):
             return makeResult(
@@ -149,10 +165,10 @@ public enum ChainProbes {
 
     // MARK: - Maillon 2 : le pair MinIO dans le tailnet
 
-    /// Relit le même genre de JSON que ``tailscaleLocal(timeout:)`` — dans un
-    /// second appel de processus, pas une réutilisation du premier : les deux
-    /// sondes doivent pouvoir être rejouées indépendamment par l'appelant, à
-    /// des instants différents.
+    /// Relit le même état que ``tailscaleLocal(timeout:)``. Les deux sondes
+    /// restent rejouables indépendamment, à des instants différents ; mais
+    /// lancées ensemble — ce que font les deux appelants, en `async let` —
+    /// elles partagent **une seule** lecture : voir ``TailscaleStatusFlight``.
     public static func minioNodeOnline(nodeName: String, timeout: TimeInterval) async -> LinkProbeResult {
         let clock = ContinuousClock()
         let start = clock.now
@@ -179,6 +195,20 @@ public enum ChainProbes {
                 .minioNodeOnline, .down,
                 "Impossible de lancer « tailscale status » : \(reason).",
                 latency: latency
+            )
+        case .daemonUnreachable(let reason):
+            return makeResult(
+                .minioNodeOnline, .down,
+                "Impossible de vérifier le pair « \(nodeName) » : Tailscale ne "
+                    + "répond pas sur son interface locale (\(reason)).",
+                raw: reason, latency: latency
+            )
+        case .localAPIRejected(let status, let body):
+            return makeResult(
+                .minioNodeOnline, .down,
+                "Impossible de vérifier le pair « \(nodeName) » : l'interface "
+                    + "locale de Tailscale a répondu HTTP \(status).",
+                raw: body, latency: latency
             )
         case .emptyOutput(let stderrText, let exitCode):
             return makeResult(
@@ -533,13 +563,20 @@ public enum ChainProbes {
 
 // MARK: - Tailscale : lancer, décoder, interroger
 
-/// Ce que `tailscale status --json` a rendu, avant tout jugement sur un
-/// maillon en particulier — les deux sondes qui en dépendent partagent ce
-/// classement, mais pas le texte qu'elles en tirent.
+/// Ce que l'état de Tailscale a rendu — par la LocalAPI ou, à défaut, par
+/// `tailscale status --json` — avant tout jugement sur un maillon en
+/// particulier. Les deux sondes qui en dépendent partagent ce classement,
+/// mais pas le texte qu'elles en tirent.
 private enum TailscaleFetch: Sendable {
     case binaryMissing
     case timedOut
     case launchFailed(String)
+    /// La LocalAPI est annoncée dans `/Library/Tailscale` mais personne n'écoute
+    /// sur son port : l'extension réseau est arrêtée, ou Tailscale a été quitté.
+    case daemonUnreachable(String)
+    /// La LocalAPI a répondu, mais autre chose que 200 — jeton refusé, ou
+    /// démon qui signale une erreur.
+    case localAPIRejected(status: Int, body: String)
     /// Sortie standard vide. Vécu : mauvais mot de passe de démon, service
     /// arrêté — le message utile est alors sur stderr, pas sur stdout.
     case emptyOutput(stderr: String, exitCode: Int32)
@@ -547,43 +584,297 @@ private enum TailscaleFetch: Sendable {
     case decoded(RawTailscaleStatus, raw: String)
 }
 
-/// Emplacements connus du client Tailscale sur macOS. **Pas de recherche dans
-/// `PATH`** : sous launchd le `PATH` est minimal et n'y trouverait rien, et
-/// pas de chemin d'utilisateur en dur — ce sont des emplacements
+/// Emplacements connus du client Tailscale sur macOS — le **repli**, quand la
+/// LocalAPI n'est pas lisible (voir ``TailscaleLocalAPI``). **Pas de recherche
+/// dans `PATH`** : sous launchd le `PATH` est minimal et n'y trouverait rien,
+/// et pas de chemin d'utilisateur en dur — ce sont des emplacements
 /// d'installation standard, valables sur n'importe quel Mac.
+///
+/// **Le binaire de l'app en dernier, et c'était l'inverse.** Il passait
+/// premier « parce qu'il a la version du démon ». Mais sur la variante
+/// autonome (`io.tailscale.ipn.macsys`) comme sur celle du Mac App Store, ce
+/// binaire **est** l'agent de barre de menus (`LSUIElement`) : relevé le
+/// 17/09/2026, chaque `status --json` lancé par bran s'enregistrait auprès de
+/// LaunchServices en `type="UIElement"` et posait une icône Tailscale dans la
+/// barre de menus — deux côte à côte, puisque deux sondes partaient ensemble,
+/// pendant plus de 14 s, toutes les 45 s. Et sous launchd il ne rend même pas
+/// de JSON (voir ``locateTailscaleBinaries()``). Un binaire Homebrew, lui, est
+/// un vrai CLI sans interface, qui trouve le démon de l'app par
+/// `/Library/Tailscale/ipnport` comme bran le fait.
+///
+/// `/usr/local/bin/tailscale` n'est souvent **pas** Homebrew : l'app y pose
+/// un script de deux lignes qui `exec` son propre binaire. Il reste dans la
+/// liste — un Mac Intel à Homebrew en a besoin — mais après
+/// `/opt/homebrew/bin`, et on ne lui prête aucune vertu de plus qu'à l'app.
 private let knownTailscaleBinaries = [
-    // L'app du Mac App Store et l'app signée directement : le même binaire
-    // sert de CLI quand on l'appelle avec `status --json`.
-    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-    // Homebrew, Apple Silicon puis Intel.
+    // Homebrew, Apple Silicon puis Intel (ou le script de l'app, voir plus haut).
     "/opt/homebrew/bin/tailscale",
     "/usr/local/bin/tailscale",
+    // L'app du Mac App Store et l'app signée directement : le même binaire
+    // sert de CLI quand on l'appelle avec `status --json`, au prix d'une icône.
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
 ]
-
-// Pas `private` : `BackupProvisioning.deduceTailscalePeer(fromEndpoint:timeout:)`
-// doit localiser le même binaire pour interroger `tailscale status --json`
-// à l'import, et dupliquer cette liste d'emplacements serait la façon
-// classique de les faire diverger en silence.
-func locateTailscaleBinary() -> String? {
-    locateTailscaleBinaries().first
-}
 
 /// Tous les emplacements présents, dans l'ordre de préférence — parce qu'« il
 /// existe » et « il répond » sont deux choses différentes, et que la
 /// confusion des deux a empêché toute sauvegarde planifiée sur ce Mac.
 ///
 /// **Mesuré le 02/09/2026.** Sous launchd, l'environnement se réduit à
-/// `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. Le binaire de `Tailscale.app` —
-/// premier de la liste, parce qu'il a la version du démon — n'est pas un vrai
-/// CLI : privé de session graphique il tente de démarrer l'interface, échoue,
-/// et écrit `The Tailscale GUI failed to start: … (Tailscale.CLIError error
-/// 3.)` **sur stdout**. Une sortie non vide qui n'est pas du JSON, donc
-/// `unreadableJSON`, donc chaîne réseau déclarée en panne, donc job planifié
-/// qui sort en code 1 sans jamais lancer kopia. Le binaire Homebrew, lui,
-/// rend un JSON parfaitement valide dans ce même environnement vide.
-func locateTailscaleBinaries() -> [String] {
+/// `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. Le binaire de `Tailscale.app` n'est
+/// pas un vrai CLI : privé de session graphique il tente de démarrer
+/// l'interface, échoue, et écrit `The Tailscale GUI failed to start: …
+/// (Tailscale.CLIError error 3.)` **sur stdout**. Une sortie non vide qui
+/// n'est pas du JSON, donc `unreadableJSON`, donc chaîne réseau déclarée en
+/// panne, donc job planifié qui sort en code 1 sans jamais lancer kopia. Le
+/// binaire Homebrew, lui, rend un JSON parfaitement valide dans ce même
+/// environnement vide — et c'est lui qui sauvait le job, jusqu'à ce que
+/// Homebrew perde son `tailscale` le 17/09/2026. D'où la LocalAPI.
+private func locateTailscaleBinaries() -> [String] {
     knownTailscaleBinaries.filter { FileManager.default.isExecutableFile(atPath: $0) }
 }
+
+// MARK: - Tailscale : une seule lecture à la fois
+
+/// L'état de Tailscale tel que les sondes le lisent. Pas `private` :
+/// `BackupProvisioning.deduceTailscalePeer(fromEndpoint:timeout:)` en a besoin
+/// à l'import, et le relire par un autre chemin serait la façon classique de
+/// voir les deux diverger en silence.
+func readTailscaleStatus(timeout: TimeInterval) async -> RawTailscaleStatus? {
+    guard case .decoded(let status, _) = await TailscaleStatusFlight.shared.fetch(timeout: timeout) else {
+        return nil
+    }
+    return status
+}
+
+private func runTailscaleStatus(timeout: TimeInterval) async -> TailscaleFetch {
+    await TailscaleStatusFlight.shared.fetch(timeout: timeout)
+}
+
+/// **Une lecture en vol à la fois, partagée par qui la demande pendant ce
+/// temps.** `probeFastLinks()` et `BackupHeadlessRun.probeChain` lancent
+/// ``ChainProbes/tailscaleLocal(timeout:)`` et
+/// ``ChainProbes/minioNodeOnline(nodeName:timeout:)`` dans le même instant :
+/// deux `tailscale status --json` partaient ensemble — les deux PID
+/// consécutifs relevés le 17/09/2026 — pour lire deux fois le même document.
+///
+/// Pas de cache au-delà du vol : une lecture qui vient de se terminer n'est
+/// jamais resservie à un appelant arrivé après. La chaîne tient à ce que
+/// chaque mesure ait son propre instant (``ChainEvaluator`` juge leur âge), et
+/// la LocalAPI rend la question du coût caduque — 34 ms, aucun processus.
+private actor TailscaleStatusFlight {
+    static let shared = TailscaleStatusFlight()
+
+    private var inFlight: Task<TailscaleFetch, Never>?
+
+    func fetch(timeout: TimeInterval) async -> TailscaleFetch {
+        if let inFlight { return await inFlight.value }
+        let task = Task { await fetchTailscaleStatusOnce(timeout: timeout) }
+        inFlight = task
+        let fetch = await task.value
+        inFlight = nil
+        return fetch
+    }
+}
+
+/// La LocalAPI d'abord ; le CLI seulement si elle n'est pas lisible.
+///
+/// **Pas de repli CLI quand la LocalAPI est annoncée mais muette.** Le CLI
+/// cherche le démon exactement au même endroit que nous : il n'aurait rien de
+/// plus à dire, et sur un Mac sans Homebrew il ne resterait que le binaire de
+/// l'app — l'icône dans la barre de menus, pour rapporter la même panne.
+private func fetchTailscaleStatusOnce(timeout: TimeInterval) async -> TailscaleFetch {
+    switch TailscaleLocalAPI.discover() {
+    case .found(let port, let token):
+        return await TailscaleLocalAPI.status(port: port, token: token, timeout: timeout)
+    case .unavailable:
+        return await runTailscaleCLI(timeout: timeout)
+    }
+}
+
+// MARK: - Tailscale : la LocalAPI
+
+/// Le démon Tailscale sert son état en HTTP sur une interface locale — celle
+/// que le CLI interroge lui-même. La lire directement ne lance **aucun
+/// processus**, donc aucune icône, et marche sous launchd sans session
+/// graphique.
+///
+/// **Relevé le 17/09/2026 sur la variante autonome 1.102.4**
+/// (`io.tailscale.ipn.macsys`, démon dans l'extension système) :
+///
+/// - `/Library/Tailscale/ipnport` est un lien symbolique dont la **cible** est
+///   le numéro de port TCP sur 127.0.0.1 (`ipnport -> 52558`) ;
+/// - `/Library/Tailscale/sameuserproof-<port>` porte le jeton, 20 caractères,
+///   `root:admin` en `0640` — lisible par un compte administrateur seulement ;
+/// - `GET /localapi/v0/status` en authentification Basic, utilisateur vide,
+///   jeton en mot de passe : 200 et le même JSON que `tailscale status --json`
+///   (13 610 octets) en 34 ms ; 401 sans le jeton.
+///
+/// Ce n'est pas une API publique documentée : c'est le chemin qu'emprunte le
+/// client Go de Tailscale sur macOS (`safesocket`). S'il change, ``discover()``
+/// ne trouve plus rien et la sonde retombe sur le CLI — plus lent, parfois
+/// visible, mais pas aveugle. La variante Mac App Store, bac à sable oblige,
+/// ne publie pas ces fichiers : elle passe toujours par le repli.
+private enum TailscaleLocalAPI {
+    enum Discovery: Sendable {
+        case found(port: UInt16, token: String)
+        /// Absent, illisible (compte non administrateur) ou de forme
+        /// inattendue : dans tous les cas, on ne sait pas parler au démon.
+        case unavailable
+    }
+
+    private static let directory = "/Library/Tailscale"
+
+    static func discover() -> Discovery {
+        let fileManager = FileManager.default
+        guard let target = try? fileManager.destinationOfSymbolicLink(atPath: "\(directory)/ipnport"),
+              let port = UInt16(target.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let proof = fileManager.contents(atPath: "\(directory)/sameuserproof-\(port)"),
+              let token = String(data: proof, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              token.isEmpty == false
+        else {
+            return .unavailable
+        }
+        return .found(port: port, token: token)
+    }
+
+    static func status(port: UInt16, token: String, timeout: TimeInterval) async -> TailscaleFetch {
+        let credentials = Data(":\(token)".utf8).base64EncodedString()
+        // **HTTP/1.0, exprès.** En 1.1, le serveur Go découpe un corps de
+        // 13 Ko en `chunked` ; en 1.0 il l'envoie d'un bloc et ferme la
+        // connexion — relevé le 17/09/2026. Lire jusqu'à la fermeture
+        // dispense d'écrire un décodeur de morceaux dont personne n'a besoin.
+        // L'hôte est celui qu'envoie le client officiel.
+        let request = """
+            GET /localapi/v0/status HTTP/1.0\r
+            Host: local-tailscaled.sock\r
+            Authorization: Basic \(credentials)\r
+            User-Agent: bran\r
+            \r
+
+            """
+
+        switch await loopbackExchange(port: port, request: Data(request.utf8), timeout: timeout) {
+        case .timedOut:
+            return .timedOut
+        case .transportError(let reason):
+            return .daemonUnreachable(reason)
+        case .response(let status, let body):
+            let text = String(data: body, encoding: .utf8) ?? "<corps illisible, \(body.count) octets>"
+            guard status == 200 else {
+                return .localAPIRejected(status: status, body: text)
+            }
+            do {
+                return .decoded(try JSONDecoder().decode(RawTailscaleStatus.self, from: body), raw: text)
+            } catch {
+                return .unreadableJSON(raw: "\(text)\n[décodage] \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+/// Écrit `request` sur 127.0.0.1:`port` et lit la réponse **jusqu'à la
+/// fermeture**, puis la sépare en code et corps.
+///
+/// `NWConnection` et pas `URLSession`, pour la raison documentée sur
+/// ``httpGET(_:timeout:)`` : App Transport Security refuse le HTTP en clair
+/// vers une adresse IP littérale avant même que le paquet parte.
+///
+/// Plafonné à ``DataAccumulator/limit`` comme la sortie d'un processus : ce
+/// corps est décodé en JSON, un préfixe ne vaut rien.
+private func loopbackExchange(port: UInt16, request: Data, timeout: TimeInterval) async -> HTTPOutcome {
+    guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+        return .transportError("port invalide : \(port)")
+    }
+
+    return await withCheckedContinuation { continuation in
+        let guardian = SingleResume(continuation)
+        let connection = NWConnection(host: "127.0.0.1", port: nwPort, using: .tcp)
+
+        // Voir `probeTCP` pour `nonisolated(unsafe)`.
+        nonisolated(unsafe) let timeoutWork = DispatchWorkItem {
+            connection.stateUpdateHandler = nil
+            connection.cancel()
+            guardian.resume(.timedOut)
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork)
+
+        let recurse = SendableBox<@Sendable (Data) -> Void>()
+
+        // Même coupure de cycle que dans `cleartextGET` : `receiveAll` capture
+        // `recurse`, qui le retient en retour.
+        let finish: @Sendable (HTTPOutcome) -> Void = { outcome in
+            timeoutWork.cancel()
+            connection.stateUpdateHandler = nil
+            recurse.value = nil
+            guardian.resume(outcome)
+            connection.cancel()
+        }
+
+        let receiveAll: @Sendable (Data) -> Void = { accumulated in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, receiveError in
+                var buffer = accumulated
+                if let data { buffer.append(data) }
+
+                guard buffer.count <= DataAccumulator.limit else {
+                    finish(.transportError("réponse de plus de \(DataAccumulator.limit) octets, abandonnée"))
+                    return
+                }
+                // Le serveur ferme après le corps : c'est la fin du document.
+                // Une erreur de réception après des octets reçus se juge de
+                // même — sur le corps, pas sur l'erreur.
+                guard isComplete || receiveError != nil else {
+                    recurse.value?(buffer)
+                    return
+                }
+                if buffer.isEmpty, let receiveError {
+                    finish(.transportError(receiveError.localizedDescription))
+                    return
+                }
+                finish(splitHTTPResponse(buffer))
+            }
+        }
+        recurse.value = receiveAll
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                connection.send(content: request, completion: .contentProcessed { error in
+                    if let error {
+                        finish(.transportError(error.localizedDescription))
+                        return
+                    }
+                    receiveAll(Data())
+                })
+            case .failed(let error):
+                finish(.transportError(error.localizedDescription))
+            case .waiting(let error):
+                // Sur la boucle locale, attendre n'a pas de sens : `.waiting`
+                // y veut dire « connexion refusée », personne n'écoute. On le
+                // dit tout de suite plutôt que de laisser courir le délai.
+                finish(.transportError(error.localizedDescription))
+            default:
+                break
+            }
+        }
+        connection.start(queue: .global())
+    }
+}
+
+/// Sépare une réponse HTTP complète en code et corps. Un en-tête sans ligne
+/// de statut lisible, ou sans fin d'en-têtes, n'est pas une réponse.
+private func splitHTTPResponse(_ buffer: Data) -> HTTPOutcome {
+    guard let separator = buffer.range(of: Data("\r\n\r\n".utf8)),
+          let lineEnd = buffer.range(of: Data("\r\n".utf8)),
+          let statusLine = String(data: buffer[buffer.startIndex..<lineEnd.lowerBound], encoding: .utf8),
+          let status = parseHTTPStatusLine(statusLine)
+    else {
+        return .transportError("réponse sans en-tête HTTP complet (\(buffer.count) octets reçus)")
+    }
+    return .response(status: status, body: Data(buffer[separator.upperBound...]))
+}
+
+// MARK: - Tailscale : le repli par le CLI
 
 /// Lance `tailscale status --json` et le décode.
 ///
@@ -594,7 +885,7 @@ func locateTailscaleBinaries() -> [String] {
 /// classer cet avertissement en échec, c'est justement ce qui distingue une
 /// sonde honnête d'une sonde qui panique sur du bruit. Seule l'absence de
 /// JSON exploitable sur stdout est un signal.
-private func runTailscaleStatus(timeout: TimeInterval) async -> TailscaleFetch {
+private func runTailscaleCLI(timeout: TimeInterval) async -> TailscaleFetch {
     let binaries = locateTailscaleBinaries()
     guard binaries.isEmpty == false else { return .binaryMissing }
 

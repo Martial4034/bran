@@ -260,7 +260,7 @@ enum BackupProvisioning {
         let ip: String
     }
 
-    /// Interroge `tailscale status --json` pour trouver qui, dans ce
+    /// Lit l'état de Tailscale (LocalAPI, sinon `tailscale status --json`) pour trouver qui, dans ce
     /// tailnet, porte l'adresse que `s3Endpoint` désigne — la seule source
     /// disponible à l'import, puisque `repository.config` n'en dit rien.
     ///
@@ -274,13 +274,7 @@ enum BackupProvisioning {
         timeout: TimeInterval
     ) async -> DeducedTailscalePeer? {
         guard let (host, _) = parseHostPort(endpoint), isTailscaleAddress(host) else { return nil }
-        guard let binary = locateTailscaleBinary() else { return nil }
-
-        let outcome = await runProcess(executable: binary, arguments: ["status", "--json"], timeout: timeout)
-        guard case .finished(_, let stdout, _) = outcome, stdout.isEmpty == false,
-              let status = try? JSONDecoder().decode(RawTailscaleStatus.self, from: stdout),
-              let peers = status.Peer
-        else {
+        guard let status = await readTailscaleStatus(timeout: timeout), let peers = status.Peer else {
             return nil
         }
 
