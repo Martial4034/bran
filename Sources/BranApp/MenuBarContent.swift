@@ -7,6 +7,7 @@ struct MenuBarContent: View {
     @AppStorage(MenuBarPreferences.showsHistoryKey) private var showsHistory = true
     @AppStorage(MenuBarPreferences.showsUpcomingMeetingKey) private var showsUpcomingMeeting = true
     @AppStorage(MenuBarPreferences.showsAwakeKey) private var showsAwake = true
+    @AppStorage(MenuBarPreferences.showsGesturesKey) private var showsGestures = true
     @AppStorage(MenuBarPreferences.showsSpeedKey) private var showsSpeed = true
     @AppStorage(MenuBarPreferences.showsRecordingKey) private var showsRecording = true
     @AppStorage(MenuBarPreferences.showsUpdatesKey) private var showsUpdates = true
@@ -59,6 +60,15 @@ struct MenuBarContent: View {
 
         if showsAwake || model.awake.isOn {
             AwakeMenu(awake: model.awake)
+
+            Divider()
+        }
+
+        // Même règle que l'éveil : masquée au repos, la rubrique revient dès
+        // que les gestes sont allumés — sinon on ne pourrait plus les couper
+        // depuis le menu.
+        if showsGestures || model.gesturesSettings.isEnabled {
+            GesturesMenu(gestures: model.gestures)
 
             Divider()
         }

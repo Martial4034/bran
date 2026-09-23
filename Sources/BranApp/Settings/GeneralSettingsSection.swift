@@ -21,6 +21,7 @@ struct GeneralSettingsSection: View {
     @AppStorage(MenuBarPreferences.showsHistoryKey) private var showsHistory = true
     @AppStorage(MenuBarPreferences.showsUpcomingMeetingKey) private var showsUpcomingMeeting = true
     @AppStorage(MenuBarPreferences.showsAwakeKey) private var showsAwake = true
+    @AppStorage(MenuBarPreferences.showsGesturesKey) private var showsGestures = true
     @AppStorage(MenuBarPreferences.showsSpeedKey) private var showsSpeed = true
     @AppStorage(MenuBarPreferences.showsRecordingKey) private var showsRecording = true
     @AppStorage(MenuBarPreferences.showsUpdatesKey) private var showsUpdates = true
@@ -55,6 +56,7 @@ struct GeneralSettingsSection: View {
             Toggle("Historique", isOn: $showsHistory)
             Toggle("Prochain rendez-vous", isOn: $showsUpcomingMeeting)
             Toggle("Garder le Mac éveillé", isOn: $showsAwake)
+            Toggle("Gestes du trackpad", isOn: $showsGestures)
             Toggle("Tester le débit", isOn: $showsSpeed)
             Toggle("Démarrer un enregistrement", isOn: $showsRecording)
             Toggle("Consommation", isOn: Binding(
@@ -70,6 +72,8 @@ struct GeneralSettingsSection: View {
         }
 
         AwakeSettingsSection(model: model)
+
+        GesturesSettingsSection(model: model)
 
         Section("Dossier des enregistrements") {
             HStack(spacing: Space.small) {

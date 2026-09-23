@@ -9,6 +9,7 @@ enum MenuBarPreferences {
     static let showsHistoryKey = "bran.menu.showsHistory"
     static let showsUpcomingMeetingKey = "bran.menu.showsUpcomingMeeting"
     static let showsAwakeKey = "bran.menu.showsAwake"
+    static let showsGesturesKey = "bran.menu.showsGestures"
     static let showsSpeedKey = "bran.menu.showsSpeed"
     static let showsRecordingKey = "bran.menu.showsRecording"
     static let showsUpdatesKey = "bran.menu.showsUpdates"

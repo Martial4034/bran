@@ -83,6 +83,15 @@ public final class AppModel {
     let awakeSettings = AwakeSettings()
     let awake: AwakeController
 
+    /// Les gestes du trackpad sur les barres de titre, venus de SwishClone.
+    ///
+    /// Aussi autonome que l'éveil : il ne connaît rien du reste de bran, et
+    /// rien ne le connaît. Pas même de fermeture d'échec — un échec ici n'est
+    /// pas un événement à annoncer mais un état qui dure (l'Accessibilité
+    /// manque), et il s'affiche là où l'on regarde l'interrupteur.
+    let gesturesSettings = GesturesSettings()
+    let gestures: GesturesController
+
     /// Ce que bran coûte, en processeur et en mémoire.
     ///
     /// **La contrainte C10 dit qu'un plafond CPU/énergie est un critère de
@@ -220,6 +229,7 @@ public final class AppModel {
         self.uploads = UploadService(store: store)
         self.directory = MeetingDirectory(configuration: uploads.configuration)
         self.awake = AwakeController(settings: awakeSettings)
+        self.gestures = GesturesController(settings: gesturesSettings)
         // La version vient de `UpdateService`, seul endroit du programme qui la
         // lise, et le compteur ne s'en sert que pour se nommer auprès du serveur
         // de mesure. Voir `SpeedPlan.userAgent`.
@@ -396,6 +406,7 @@ public final class AppModel {
         startSnapshot()
         startWatch()
         startAwake()
+        gestures.start()
         startMeter()
         startSpeed()
         clipboard.start(monitor: shortcuts.monitor)
@@ -436,6 +447,8 @@ public final class AppModel {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.loginItem.refresh()
+                // On revient peut-être d'avoir accordé l'Accessibilité.
+                self.gestures.retryIfNeeded()
                 Task { await self.notifications.refresh() }
             }
         }
