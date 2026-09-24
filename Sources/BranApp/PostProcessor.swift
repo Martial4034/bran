@@ -2,6 +2,7 @@ import AVFoundation
 import BranCore
 import Foundation
 import Synchronization
+import VideoToolbox
 
 /// Recolle les segments et compresse — **en une seule passe d'encodage**.
 ///
@@ -246,16 +247,43 @@ actor PostProcessor {
         let writer = try AVAssetWriter(outputURL: destination, fileType: .mp4)
         let reader = try AVAssetReader(asset: asset)
 
-        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.hevc,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitrate,
-                AVVideoMaxKeyFrameIntervalKey: Int(frameRate * 2),
-                AVVideoExpectedSourceFrameRateKey: Int(frameRate),
-            ],
-        ])
+        let baseCompression: [String: Any] = [
+            AVVideoAverageBitRateKey: bitrate,
+            AVVideoMaxKeyFrameIntervalKey: Int(frameRate * 2),
+            AVVideoExpectedSourceFrameRateKey: Int(frameRate),
+        ]
+        func videoSettings(_ compression: [String: Any]) -> [String: Any] {
+            [
+                AVVideoCodecKey: AVVideoCodecType.hevc,
+                AVVideoWidthKey: Int(size.width),
+                AVVideoHeightKey: Int(size.height),
+                AVVideoCompressionPropertiesKey: compression,
+            ]
+        }
+
+        // **Le goulot est l'encodeur matériel, et lui seul.** Mesuré le
+        // 24/09/2026 sur un M2 Pro, extrait de 3 min d'une vraie réunion en
+        // 5160×2160 : 1,40× le temps réel par défaut, 2,40× en privilégiant la
+        // vitesse — une réunion de 29 min passe d'environ 20 min de fusion à 12.
+        // Même taille de fichier (219 contre 216 Mo), SSIM 0,9985 contre
+        // 0,9988, texte identique à l'œil.
+        //
+        // Ce qui n'aide pas, mesuré aussi : lire en 420v plutôt qu'en BGRA
+        // (128,0 s contre 128,4 s), et deux encodages en parallèle (le M2 Pro
+        // n'a qu'un moteur HEVC : chacun tombe à 1,19×).
+        //
+        // **`canApply` d'abord**, parce qu'un réglage refusé par
+        // `AVAssetWriterInput` lève une exception Objective-C que Swift ne sait
+        // pas rattraper : l'application tomberait en pleine fusion. Un Mac qui
+        // ne connaît pas la clé reçoit exactement les réglages d'avant.
+        var fastCompression = baseCompression
+        fastCompression[kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality as String] = true
+        let fastSettings = videoSettings(fastCompression)
+        let chosenSettings = writer.canApply(outputSettings: fastSettings, forMediaType: .video)
+            ? fastSettings
+            : videoSettings(baseCompression)
+
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: chosenSettings)
         videoInput.expectsMediaDataInRealTime = false
         videoInput.transform = try await videoTrack.load(.preferredTransform)
         writer.add(videoInput)
