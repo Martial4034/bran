@@ -2,6 +2,7 @@ import AVFoundation
 import BranCore
 import Foundation
 import Synchronization
+import VideoToolbox
 
 /// Recolle les segments et compresse — **en une seule passe d'encodage**.
 ///
@@ -254,6 +255,17 @@ actor PostProcessor {
                 AVVideoAverageBitRateKey: bitrate,
                 AVVideoMaxKeyFrameIntervalKey: Int(frameRate * 2),
                 AVVideoExpectedSourceFrameRateKey: Int(frameRate),
+                // **Le goulot est l'encodeur matériel, et lui seul.** Mesuré le
+                // 24/09/2026 sur un M2 Pro, extrait de 3 min d'une vraie réunion
+                // en 5160×2160 : 1,40× le temps réel par défaut, 2,40× avec ce
+                // réglage — une réunion de 29 min passe d'environ 20 min de
+                // fusion à 12. Même taille de fichier (219 contre 216 Mo), SSIM
+                // 0,9985 contre 0,9988, texte identique à l'œil.
+                //
+                // Ce qui n'aide pas, mesuré aussi : lire en 420v plutôt qu'en
+                // BGRA (128,0 s contre 128,4 s), et deux encodages en parallèle
+                // (le M2 Pro n'a qu'un moteur HEVC : chacun tombe à 1,19×).
+                kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality as String: true,
             ],
         ])
         videoInput.expectsMediaDataInRealTime = false
