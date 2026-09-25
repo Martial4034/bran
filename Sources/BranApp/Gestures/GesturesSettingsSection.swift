@@ -4,15 +4,21 @@ import SwishGestures
 /// Les réglages des gestes, dans « Général ».
 ///
 /// **Pas un onglet**, pour la même raison que l'éveil : un interrupteur et
-/// quatre curseurs ne font pas un écran.
+/// quelques curseurs ne font pas un écran.
 ///
 /// **Deux sources, et c'est voulu.** L'interrupteur principal est à bran
 /// (`GesturesSettings`) ; tout le reste pilote directement
-/// `GestureSettings.shared`, du paquet SwishClone, que les moniteurs relisent
-/// à chaque geste — un curseur déplacé s'applique au geste suivant, sans
-/// bouton ni redémarrage. Les bornes des curseurs sont celles de la fenêtre de
+/// `GestureSettings.shared`, du paquet SwishClone, que le tap relit à chaque
+/// geste — un curseur déplacé s'applique au geste suivant, sans bouton ni
+/// redémarrage. Les bornes des curseurs sont celles de la fenêtre de
 /// préférences de SwishClone : elles ont été choisies là-bas, sur le trackpad,
 /// et n'ont pas de raison d'être différentes ici.
+///
+/// **Ce qu'on règle tous les jours, et ce qu'on règle une fois.** L'aperçu et
+/// le retour haptique sont à la vue : c'est ce qu'on coupe quand ils gênent.
+/// Le rythme des enchaînements (pause entre deux étapes, délai d'annulation)
+/// se règle une fois sur son propre trackpad, puis on n'y revient plus : il est
+/// dans « Avancé », replié.
 struct GesturesSettingsSection: View {
     @Bindable var model: AppModel
 
@@ -23,12 +29,12 @@ struct GesturesSettingsSection: View {
 
     var body: some View {
         Section("Gestes du trackpad") {
-            Toggle("Gestes sur les barres de titre", isOn: Binding(
+            Toggle("Gestes sur les barres de titre et le Dock", isOn: Binding(
                 get: { gestures.settings.isEnabled },
                 set: { gestures.setEnabled($0) }
             ))
 
-            Text("Deux doigts sur la barre de titre de la fenêtre au premier plan : glisser à gauche ou à droite la range sur la moitié de l'écran, vers le haut l'agrandit, vers le bas la réduit dans le Dock. Écarter les doigts bascule le plein écran, les resserrer la recentre en plus petit. Ailleurs, le trackpad ne change pas.")
+            Text("Deux doigts sur la barre de titre d'une fenêtre : glisser à gauche ou à droite la range sur la moitié de l'écran, vers le haut l'agrandit, vers le bas la réduit dans le Dock. Enchaîner deux directions sans lever les doigts, avec une courte pause entre elles, vise un quart d'écran (↓ puis → : en bas à droite) ; deux fois la même direction verticale, une moitié haute ou basse. Écarter les doigts bascule le plein écran, les resserrer ferme la fenêtre. Sur une icône du Dock, resserrer quitte l'app. Échap annule le geste en cours. Ailleurs, le trackpad ne change pas.")
                 .font(Type.meta)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -39,6 +45,8 @@ struct GesturesSettingsSection: View {
 
             Toggle("Glisser (gauche, droite, haut, bas)", isOn: $tuning.swipeEnabled)
             Toggle("Pincer (écarter, resserrer)", isOn: $tuning.pinchEnabled)
+            Toggle("Aperçu pendant le geste", isOn: $tuning.previewEnabled)
+            Toggle("Retour haptique", isOn: $tuning.hapticsEnabled)
 
             sliderRow(
                 "Seuil du glissement",
@@ -69,6 +77,25 @@ struct GesturesSettingsSection: View {
                 in: 0.05 ... 0.5,
                 display: tuning.animationDuration.formatted(.number.precision(.fractionLength(2))) + " s"
             )
+
+            DisclosureGroup("Avancé") {
+                sliderRow(
+                    "Pause entre deux étapes",
+                    value: $tuning.stepPause,
+                    in: 0.15 ... 0.5,
+                    display: tuning.stepPause.formatted(.number.precision(.fractionLength(2))) + " s"
+                )
+                sliderRow(
+                    "Délai d'annulation",
+                    value: $tuning.cancelTimeout,
+                    in: 0.6 ... 2,
+                    display: tuning.cancelTimeout.formatted(.number.precision(.fractionLength(1))) + " s"
+                )
+                Text("Immobile plus longtemps que la pause, une direction est validée et on peut en enchaîner une autre sans lever les doigts. Immobile plus longtemps que le délai d'annulation, le geste est abandonné et rien n'est appliqué.")
+                    .font(Type.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -93,17 +120,26 @@ struct GesturesSettingsSection: View {
         }
     }
 
-    /// L'Accessibilité manquante a un bouton ; l'autre échec n'en a pas, parce
-    /// qu'aucun réglage de bran ne le résout.
-    private func problemRow(_ problem: String) -> some View {
+    /// Chaque cause a sa sortie : l'Accessibilité manquante un bouton vers les
+    /// Réglages système, une autre app de gestes un « Réessayer » (une fois
+    /// quittée), et le refus d'écoute rien — aucun réglage de bran ne le
+    /// résout.
+    private func problemRow(_ problem: GesturesController.Problem) -> some View {
         HStack(alignment: .top, spacing: Space.small) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Palette.attention)
             VStack(alignment: .leading, spacing: Space.tight) {
-                Text(problem)
+                Text(problem.message)
                     .font(Type.cardBody)
-                if HotkeyMonitor.isTrusted == false {
-                    Button("Ouvrir les Réglages") { _ = SystemSettings.reRequestAccessibility() }
+                switch problem {
+                case .accessibilityMissing:
+                    if HotkeyMonitor.isTrusted == false {
+                        Button("Ouvrir les Réglages") { _ = SystemSettings.reRequestAccessibility() }
+                    }
+                case .anotherHost:
+                    Button("Réessayer") { gestures.retry() }
+                case .listeningRefused:
+                    EmptyView()
                 }
             }
         }

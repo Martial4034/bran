@@ -12,10 +12,10 @@ let package = Package(
         // Les mises à jour automatiques. Voir `UpdateService` pour ce qu'elle porte
         // et `Scripts/release.sh` pour ce qui les publie.
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.0"),
-        // Les gestes trackpad sur la barre de titre (swipe pour ranger une
-        // fenêtre, pinch pour le plein écran). Développé à part, dans son
-        // propre paquet, et consommé ici par chemin local.
-        .package(path: "/Users/hectorpasserat/Developer/SwishClone"),
+        // Les gestes trackpad sur les barres de titre et les icônes du Dock
+        // (swipe et pinch : ranger, agrandir, réduire, plein écran, fermer,
+        // quitter). Développé à part, dans son propre paquet, MIT.
+        .package(url: "https://github.com/hectorpasserat2004-create/SwishClone.git", from: "0.1.1"),
     ],
     targets: [
         // LAME 4.0, réduit à son encodeur. **La seule bibliothèque C du dépôt,

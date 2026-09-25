@@ -19,6 +19,12 @@
     à sable n'est pas exigé, c'est du travail et une classe de pannes ajoutés
     sans contrepartie.
 
+    Les gestes du trackpad (SwishGestures) en dépendent aussi, deux fois : un
+    bac à sable interdit de piloter les fenêtres des autres apps par
+    l'Accessibilité, et le verrou qui empêche deux apps de gestes de tourner
+    ensemble vit dans le dossier temporaire de l'utilisateur — un conteneur
+    à part ne le verrait plus. Voir le README (« Things worth knowing »).
+
   - **Aucun droit d'enregistrement d'écran** : il n'en existe pas.
     ScreenCaptureKit est entièrement gouverné par TCC, c'est-à-dire par la
     fenêtre d'autorisation que l'utilisateur voit. Idem pour l'Accessibilité,
