@@ -15,7 +15,7 @@ let package = Package(
         // Les gestes trackpad sur les barres de titre et les icônes du Dock
         // (swipe et pinch : ranger, agrandir, réduire, plein écran, fermer,
         // quitter). Développé à part, dans son propre paquet, MIT.
-        .package(url: "https://github.com/hectorpasserat2004-create/SwishClone.git", from: "0.1.2"),
+        .package(url: "https://github.com/hectorpasserat2004-create/SwishClone.git", exact: "0.1.2"),
     ],
     targets: [
         // LAME 4.0, réduit à son encodeur. **La seule bibliothèque C du dépôt,
