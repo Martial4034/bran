@@ -5,21 +5,33 @@ struct MenuBarContent: View {
     @Bindable var model: AppModel
     @Environment(\.openWindow) private var openWindow
     @AppStorage(MenuBarPreferences.showsHistoryKey) private var showsHistory = true
-    @AppStorage(MenuBarPreferences.showsUpcomingMeetingKey) private var showsUpcomingMeeting = true
     @AppStorage(MenuBarPreferences.showsAwakeKey) private var showsAwake = true
     @AppStorage(MenuBarPreferences.showsSpeedKey) private var showsSpeed = true
     @AppStorage(MenuBarPreferences.showsRecordingKey) private var showsRecording = true
     @AppStorage(MenuBarPreferences.showsUpdatesKey) private var showsUpdates = true
 
     var body: some View {
-        // Affiché **aussi** pendant un enregistrement, c'est-à-dire pendant la
-        // réunion : le lien de la visio disparaissait exactement au moment où
-        // on en a besoin — pour rejoindre à nouveau après une déconnexion.
-        if showsUpcomingMeeting, let next = model.directory.next {
-            Text("Prochain RDV — \(next.displayName)")
-            if let link = next.meeting_url, let url = URL(string: link) {
-                Link("Rejoindre la visio", destination: url)
+        // **Un seul geste en tête du menu : enregistrer.** Le prochain RDV et
+        // son lien de visio occupaient cette place ; ils ne servaient pas, et
+        // repoussaient le bouton qu'on vient chercher au milieu du menu, sous
+        // une ligne dont le libellé changeait selon qu'une réunion avait été
+        // détectée ou non.
+        //
+        // `startPendingRecording` retombe de lui-même sur un enregistrement
+        // manuel quand rien n'a été détecté, et le rattachement au RDV du CRM
+        // se fait dans `begin` quel que soit le chemin : un seul bouton suffit
+        // donc aux deux cas, sans rien perdre. Il n'ouvre aucune fenêtre.
+        //
+        // Absent pendant une session et pendant la finalisation, comme avant :
+        // la machine ne l'accepterait pas. Présent pendant la fusion d'une
+        // réunion précédente, qui tourne hors du flux de capture.
+        if model.hasOpenSession == false, model.isFinalizing == false {
+            Button("Démarrer l'enregistrement", systemImage: "record.circle") {
+                model.startPendingRecording()
             }
+            .keyboardShortcut("r")
+            .disabled(model.permissions.canRecord == false)
+
             Divider()
         }
 
@@ -79,7 +91,11 @@ struct MenuBarContent: View {
                 Button("Ignorer cet avertissement") { model.lastFailure = nil }
             }
 
-        Divider()
+            // Au repos, plus rien ne suit l'état : le bouton de démarrage est
+            // monté en tête du menu. Un séparateur ici en ferait deux d'affilée.
+            if isPilotable || model.isFinalizing || model.currentStep != nil {
+                Divider()
+            }
 
         // **Ce que la chaîne de fin raconte, et les boutons, sont deux blocs
         // séparés.** Les avoir mis dans la même chaîne de `else if` fabriquait
@@ -148,23 +164,6 @@ struct MenuBarContent: View {
                     model.stopRecording()
                 }
                 .keyboardShortcut("s")
-            } else if model.isFinalizing {
-                EmptyView()
-            } else if let meeting = model.pendingMeeting {
-                Button("Démarrer — \(meeting.title ?? "réunion non reconnue")") {
-                    model.startPendingRecording()
-                }
-                .keyboardShortcut("r")
-
-                Button("Pas cette fois") {
-                    model.dismissProposal()
-                }
-            } else {
-                Button("Démarrer un enregistrement") {
-                    model.startManualRecording()
-                }
-                .keyboardShortcut("r")
-                .disabled(model.permissions.canRecord == false)
             }
 
             Divider()

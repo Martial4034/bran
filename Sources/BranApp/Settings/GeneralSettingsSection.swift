@@ -19,7 +19,6 @@ struct GeneralSettingsSection: View {
     private var opensWindowAtLaunch = true
 
     @AppStorage(MenuBarPreferences.showsHistoryKey) private var showsHistory = true
-    @AppStorage(MenuBarPreferences.showsUpcomingMeetingKey) private var showsUpcomingMeeting = true
     @AppStorage(MenuBarPreferences.showsAwakeKey) private var showsAwake = true
     @AppStorage(MenuBarPreferences.showsSpeedKey) private var showsSpeed = true
     @AppStorage(MenuBarPreferences.showsRecordingKey) private var showsRecording = true
@@ -53,10 +52,9 @@ struct GeneralSettingsSection: View {
 
         Section("Barre des menus") {
             Toggle("Historique", isOn: $showsHistory)
-            Toggle("Prochain rendez-vous", isOn: $showsUpcomingMeeting)
             Toggle("Garder le Mac éveillé", isOn: $showsAwake)
             Toggle("Tester le débit", isOn: $showsSpeed)
-            Toggle("Démarrer un enregistrement", isOn: $showsRecording)
+            Toggle("État de l'enregistrement", isOn: $showsRecording)
             Toggle("Consommation", isOn: Binding(
                 get: { model.meter.showsInMenuBar },
                 set: { model.meter.showsInMenuBar = $0 }

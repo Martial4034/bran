@@ -7,7 +7,6 @@ import Foundation
 /// disparaître le bouton d'arrêt une fois une capture lancée.
 enum MenuBarPreferences {
     static let showsHistoryKey = "bran.menu.showsHistory"
-    static let showsUpcomingMeetingKey = "bran.menu.showsUpcomingMeeting"
     static let showsAwakeKey = "bran.menu.showsAwake"
     static let showsSpeedKey = "bran.menu.showsSpeed"
     static let showsRecordingKey = "bran.menu.showsRecording"
