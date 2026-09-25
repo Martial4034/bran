@@ -12,6 +12,10 @@ let package = Package(
         // Les mises à jour automatiques. Voir `UpdateService` pour ce qu'elle porte
         // et `Scripts/release.sh` pour ce qui les publie.
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.0"),
+        // Les gestes trackpad sur les barres de titre et les icônes du Dock
+        // (swipe et pinch : ranger, agrandir, réduire, plein écran, fermer,
+        // quitter). Développé à part, dans son propre paquet, MIT.
+        .package(url: "https://github.com/hectorpasserat2004-create/SwishClone.git", from: "0.1.2"),
     ],
     targets: [
         // LAME 4.0, réduit à son encodeur. **La seule bibliothèque C du dépôt,
@@ -126,6 +130,8 @@ let package = Package(
                 "BranWindows",
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "SwishCloneCore", package: "SwishClone"),
+                .product(name: "SwishGestures", package: "SwishClone"),
             ]
         ),
 

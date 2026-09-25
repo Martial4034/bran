@@ -79,6 +79,13 @@ final class BranAppDelegate: NSObject, NSApplicationDelegate {
     /// cette fenêtre-là, rien n'a encore pu commencer à s'écrire.
     weak var model: AppModel?
 
+    /// Arrêt propre des gestes du trackpad : joint le thread du tap et libère
+    /// le verrou d'hôte. Après `applicationShouldTerminate` : si la fermeture
+    /// est refusée (un fichier s'écrit), rien ne s'arrête ici.
+    func applicationWillTerminate(_ notification: Notification) {
+        model?.gestures.shutdown()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let perte = model?.quitWouldLose else { return .terminateNow }
 

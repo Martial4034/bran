@@ -491,6 +491,16 @@ Findings from building it, each verified on a real machine:
 - **macOS 15+ periodically re-asks for screen recording consent** for apps that
   capture without going through `SCContentSharingPicker`. There is nothing you
   can do about it in-app.
+- **Only one app may run the trackpad gestures at a time — and the guard
+  assumes no sandbox.** bran and the standalone SwishClone app embed the same
+  `SwishGestures` library. `GestureMonitor.start()` takes an `flock` on a file
+  in the user's temporary folder and refuses to start, naming the holder, when
+  another app already has it. That guard only sees processes sharing the same
+  temporary folder: a sandboxed host gets its own container, would never see
+  the lock, and two hosts would then act on the same gesture. It is not the
+  only thing a sandbox would break — a sandboxed app cannot drive other apps'
+  windows through Accessibility at all — but if bran is ever sandboxed, the
+  gestures and this guard have to be redesigned together.
 
 ### What bran costs, and how you can check
 
