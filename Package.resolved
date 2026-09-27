@@ -1,5 +1,5 @@
 {
-  "originHash" : "d7f855761cfd02f5e06614b95ea17605d71007c8cf8d4415939d61c904e3652a",
+  "originHash" : "95421552464fe2353b9cfcf67eb74e1f9d3c36adbb7787c5d75d14514e5b2cb5",
   "pins" : [
     {
       "identity" : "fluidaudio",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/hectorpasserat2004-create/SwishClone.git",
       "state" : {
-        "revision" : "d8871f5c1ac23dc722142643a04ab5e0150ed4bf",
-        "version" : "0.1.3"
+        "revision" : "7f7a74c3e8e9f88cd21dac104f37bdc93f001be6",
+        "version" : "0.1.5"
       }
     }
   ],
