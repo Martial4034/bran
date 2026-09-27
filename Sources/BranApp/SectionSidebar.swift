@@ -102,6 +102,8 @@ struct SectionSidebar: View {
         // section porte — le dernier débit — n'est pas une nouveauté qu'on
         // aurait manquée.
         case .speed: 0
+        // Aucun compteur : une page de réglages montrés, rien qui arrive.
+        case .trackpad: 0
         // **Un compteur qui ne compte pas des objets, mais du retard.**
         //
         // Les autres sections répondent « combien y en a-t-il ». Celle-ci n'a
@@ -385,6 +387,13 @@ enum LibraryPane: String, CaseIterable, Identifiable {
     /// listes ferait attendre un historique là où il y a un instrument.
     case speed
 
+    /// **Juste après « Débit », et pour la même raison** : ce n'est pas une
+    /// boîte. Rien ne s'y accumule ; la page montre les gestes du trackpad,
+    /// les fait voir en mouvement, et les allume un par un. Elle vivait dans
+    /// « Général », en une phrase de six lignes — or un geste qu'on n'a jamais
+    /// vu ne se devine pas.
+    case trackpad
+
     /// **En dernier, et après « Débit », parce que c'est la seule section qui
     /// ne parle pas de ce que bran a fait.**
     ///
@@ -410,6 +419,7 @@ enum LibraryPane: String, CaseIterable, Identifiable {
         case .clipboard: "Presse-papiers"
         case .watch: "Veille"
         case .speed: "Débit"
+        case .trackpad: "Trackpad"
         case .backup: "Sauvegarde"
         }
     }
@@ -431,6 +441,9 @@ enum LibraryPane: String, CaseIterable, Identifiable {
         // rendu à l'écran, il se lit comme un « i » d'information, à côté de
         // jumelles et d'un presse-papiers qui, eux, se reconnaissent.
         case .speed: "speedometer"
+        // La main qui trace : ce qu'on fait, pas l'appareil. Un rectangle de
+        // trackpad se confondrait avec la dizaine de rectangles de la colonne.
+        case .trackpad: "hand.draw"
         // Un bouclier plutôt qu'un disque dur ou un nuage : ce que la section
         // promet n'est pas un support ni un serveur, c'est que les fichiers
         // soient encore là après. Le glyphe suit la promesse, pas la plomberie.
@@ -455,6 +468,7 @@ enum LibraryPane: String, CaseIterable, Identifiable {
         // n'est pas de la modestie, c'est le point de mesure, sans lequel un
         // débit ne se compare à rien.
         case .speed: "Ce que votre connexion tient vraiment, mesuré depuis ce Mac."
+        case .trackpad: "Ranger vos fenêtres du bout de deux doigts, sur les barres de titre et le Dock."
         // « Vérifiée » porte tout le sous-titre. Une sauvegarde qui affirme
         // avoir tourné ne vaut rien — celle-ci relit le dépôt et montre
         // l'identifiant du snapshot qu'elle y a retrouvé.

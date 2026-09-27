@@ -181,6 +181,9 @@ struct LibraryView: View {
         case .speed:
             SpeedPane(speed: model.speed)
 
+        case .trackpad:
+            TrackpadPane(model: model)
+
         case .backup:
             BackupPane(backup: model.backup)
         }
