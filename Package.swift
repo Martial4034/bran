@@ -114,6 +114,15 @@ let package = Package(
         // corriger le jour où Apple change ces API.
         .target(name: "BranWindows"),
 
+        // Ce que la page « Trackpad » décide sans rien dessiner : quels gestes
+        // vont dans quel groupe, l'activation d'un groupe entier, la reprise
+        // des anciens interrupteurs « glisser » et « pincer ». Logique pure,
+        // au-dessus du catalogue de SwishClone.
+        .target(
+            name: "BranTrackpad",
+            dependencies: [.product(name: "SwishCloneCore", package: "SwishClone")]
+        ),
+
         // L'application. Assemblée en .app signé par Scripts/build-app.sh :
         // SwiftPM produit le binaire, le script produit le bundle. Ça évite un
         // .xcodeproj tout en gardant les #Preview (ouvrir Package.swift dans
@@ -128,6 +137,7 @@ let package = Package(
                 "BranVision",
                 "BranWatch",
                 "BranWindows",
+                "BranTrackpad",
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "SwishCloneCore", package: "SwishClone"),
@@ -154,6 +164,7 @@ let package = Package(
         .testTarget(name: "BranBackupTests", dependencies: ["BranBackup"]),
         .testTarget(name: "BranCoreTests", dependencies: ["BranCore"]),
         .testTarget(name: "BranSpeechTests", dependencies: ["BranSpeech"]),
+        .testTarget(name: "BranTrackpadTests", dependencies: ["BranTrackpad"]),
         .testTarget(name: "BranVisionTests", dependencies: ["BranVision"]),
         .testTarget(name: "BranWatchTests", dependencies: ["BranWatch"]),
     ]

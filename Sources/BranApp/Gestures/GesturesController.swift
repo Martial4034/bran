@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import BranTrackpad
 import SwishGestures
 
 /// **Les gestes du trackpad : un interrupteur, et la vérité sur ce qui tourne.**
@@ -72,7 +73,25 @@ final class GesturesController {
 
     /// Appelé une fois par `AppModel`, au lancement.
     func start() {
+        Self.migrateFamilyToggles()
         apply()
+    }
+
+    /// **Les anciens interrupteurs « glisser » et « pincer » deviennent des
+    /// gestes coupés**, une fois. La page n'a plus que des cartes, geste par
+    /// geste : sans cette reprise, une famille éteinte dans l'ancienne section
+    /// montrerait des cartes allumées qui ne font rien. Voir
+    /// `TrackpadToggles.migrated`.
+    private static func migrateFamilyToggles() {
+        let tuning = GestureSettings.shared
+        guard let disabled = TrackpadToggles.migrated(
+            swipeEnabled: tuning.swipeEnabled,
+            pinchEnabled: tuning.pinchEnabled,
+            disabled: tuning.disabledActions
+        ) else { return }
+        tuning.disabledActions = disabled
+        tuning.swipeEnabled = true
+        tuning.pinchEnabled = true
     }
 
     func setEnabled(_ enabled: Bool) {
