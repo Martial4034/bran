@@ -47,6 +47,11 @@ struct GesturesSettingsSection: View {
             Toggle("Pincer (écarter, resserrer)", isOn: $tuning.pinchEnabled)
             Toggle("Aperçu pendant le geste", isOn: $tuning.previewEnabled)
             Toggle("Retour haptique", isOn: $tuning.hapticsEnabled)
+            Toggle("Redimensionner les fenêtres voisines", isOn: $tuning.linkedResizeEnabled)
+            Text("Deux fenêtres rangées en moitiés (gauche et droite, haut et bas) se redimensionnent ensemble en glissant leur bord commun. ⌘ enfoncé : seule celle au premier plan suit.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             sliderRow(
                 "Seuil du glissement",
