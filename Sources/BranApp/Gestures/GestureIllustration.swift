@@ -1,5 +1,6 @@
 import SwiftUI
 import SwishCloneCore
+import SwishGestures
 
 /// **Le mini-écran d'une carte de geste** : ce que fait le geste, dessiné.
 ///
@@ -30,6 +31,9 @@ struct GestureMiniScreen: View {
     /// Les doigts ne se montrent que pendant la relecture.
     let showsFingers: Bool
     let tint: Color
+    /// La taille réglée de la fenêtre centrée : la carte « Centrer » dessine
+    /// ce que fera vraiment le geste.
+    @ObservedObject private var settings = GestureSettings.shared
 
     /// Le repère du dessin, et ses repères fixes.
     enum Metric {
@@ -69,8 +73,8 @@ struct GestureMiniScreen: View {
                     RoundedRectangle(cornerRadius: 3 * scale, style: .continuous)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
                         .foregroundStyle(.tertiary)
-                        .frame(width: Metric.start.width * scale, height: Metric.start.height * scale)
-                        .offset(x: Metric.start.minX * scale, y: Metric.start.minY * scale)
+                        .frame(width: start.width * scale, height: start.height * scale)
+                        .offset(x: start.minX * scale, y: start.minY * scale)
                 }
 
                 window(scale: scale)
@@ -95,23 +99,29 @@ struct GestureMiniScreen: View {
             return CGRect(x: icon.midX - 5, y: icon.minY, width: 10, height: 6)
         case .toggleFullScreen:
             return CGRect(origin: .zero, size: Metric.screen)
-        case .close, .quitApp, .centerReduced:
-            return Metric.start
+        case .close, .quitApp, .quitWindowApp:
+            return start
         default:
-            return WindowLayout.frame(for: action, in: Metric.visible) ?? Metric.start
+            return WindowLayout.frame(for: action, in: Metric.visible, centerScale: settings.centerScale) ?? start
         }
     }
 
-    private var frame: CGRect { isDone ? target : Metric.start }
+    /// D'où part la fenêtre. « Centrer » part décalée dans un coin : depuis
+    /// la place habituelle, déjà presque au centre, le geste ne se verrait pas.
+    private var start: CGRect {
+        action == .centerReduced ? CGRect(x: 8, y: 11, width: 58, height: 38) : Metric.start
+    }
+
+    private var frame: CGRect { isDone ? target : start }
 
     /// Fermer et quitter font disparaître la fenêtre, sur place.
-    private var vanishes: Bool { isDone && (action == .close || action == .quitApp) }
+    private var vanishes: Bool { isDone && [.close, .quitApp, .quitWindowApp].contains(action) }
 
     private var hidesChrome: Bool { isDone && action == .toggleFullScreen }
 
     private var showsGhost: Bool {
         switch action {
-        case .close, .quitApp, .toggleFullScreen, .minimize: false
+        case .close, .quitApp, .quitWindowApp, .toggleFullScreen, .minimize: false
         default: isDone
         }
     }
@@ -146,7 +156,7 @@ struct GestureMiniScreen: View {
     /// jaune pour réduire. Les autres restent neutres.
     private func lightColor(_ index: Int) -> Color {
         let lit: Int? = switch action {
-        case .close, .quitApp: 0
+        case .close, .quitApp, .quitWindowApp: 0
         case .minimize: 1
         case .toggleFullScreen: 2
         default: nil
@@ -214,7 +224,7 @@ struct GestureMiniScreen: View {
         }
         // Le milieu de la barre de titre de la fenêtre au départ : les doigts
         // restent là où le geste a commencé, la fenêtre part sous eux.
-        return CGPoint(x: Metric.start.midX, y: Metric.start.minY + 4)
+        return CGPoint(x: start.midX, y: start.minY + 4)
     }
 
     /// Le décalage de chaque doigt, geste fait. Au départ, les deux sont
@@ -223,13 +233,13 @@ struct GestureMiniScreen: View {
         let spread: CGFloat = 4
         guard isDone else {
             // Un pincement qui ferme part écarté.
-            let start: CGFloat = (action == .close || action == .quitApp) ? 9 : spread
-            return (CGSize(width: -start, height: 0), CGSize(width: start, height: 0))
+            let open: CGFloat = [.close, .quitApp, .quitWindowApp].contains(action) ? 9 : spread
+            return (CGSize(width: -open, height: 0), CGSize(width: open, height: 0))
         }
         switch action {
         case .toggleFullScreen:
             return (CGSize(width: -12, height: 0), CGSize(width: 12, height: 0))
-        case .close, .quitApp:
+        case .close, .quitApp, .quitWindowApp:
             return (CGSize(width: -2.5, height: 0), CGSize(width: 2.5, height: 0))
         default:
             let travel = swipeTravel
