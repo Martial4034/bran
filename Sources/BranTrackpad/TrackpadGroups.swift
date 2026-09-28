@@ -10,7 +10,8 @@ import SwishCloneCore
 public enum TrackpadGroup: String, CaseIterable, Sendable {
     /// Un seul glissé, ou deux fois le même : moitiés, remplir, réduire.
     case titlebar
-    /// Deux directions enchaînées, avec une pause.
+    /// Les quarts : une diagonale d'un seul geste, ou deux directions
+    /// enchaînées avec une pause.
     case quarters
     /// Écarter et resserrer sur une barre de titre.
     case pinch
@@ -20,7 +21,7 @@ public enum TrackpadGroup: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .titlebar: "Glisser sur la barre de titre"
-        case .quarters: "Enchaîner deux directions"
+        case .quarters: "Glisser en diagonale"
         case .pinch: "Pincer"
         case .dock: "Sur une icône du Dock"
         }
@@ -29,7 +30,7 @@ public enum TrackpadGroup: String, CaseIterable, Sendable {
     public var caption: String {
         switch self {
         case .titlebar: "Deux doigts sur la barre de titre d'une fenêtre, même en arrière-plan."
-        case .quarters: "Une courte pause entre les deux, sans lever les doigts. Les deux ordres marchent."
+        case .quarters: "D'un seul geste, pour un quart d'écran. Ou deux directions, avec une courte pause entre les deux, sans lever les doigts."
         case .pinch: "Écarter ou resserrer deux doigts sur la barre de titre."
         case .dock: "Resserrer sur l'icône d'une app lancée. Ni le Finder ni bran ne sont jamais quittés."
         }
@@ -38,7 +39,8 @@ public enum TrackpadGroup: String, CaseIterable, Sendable {
     public static func of(_ entry: GestureCatalog.Entry) -> TrackpadGroup {
         if entry.target == .dockApp { return .dock }
         if entry.family == .pinch { return .pinch }
-        if case let .swipes(steps) = entry.triggers[0], Set(steps).count > 1 { return .quarters }
+        if case let .swipes(steps) = entry.triggers[0],
+           steps.contains(where: \.isDiagonal) || Set(steps).count > 1 { return .quarters }
         return .titlebar
     }
 

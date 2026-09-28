@@ -238,18 +238,24 @@ struct GestureMiniScreen: View {
         }
     }
 
-    /// Où les doigts ont glissé : la somme des étapes du déclencheur.
+    /// Où les doigts ont glissé : la somme des étapes du déclencheur. Une
+    /// diagonale compte ses deux composantes, en un seul trait.
     private var swipeTravel: CGSize {
         guard let entry = GestureCatalog.entry(for: action),
               case let .swipes(steps) = entry.triggers[0] else { return .zero }
         let step: CGFloat = 13
         return steps.reduce(.zero) { sum, direction in
-            switch direction {
-            case .left: CGSize(width: sum.width - step, height: sum.height)
-            case .right: CGSize(width: sum.width + step, height: sum.height)
-            case .up: CGSize(width: sum.width, height: sum.height - step * 0.7)
-            case .down: CGSize(width: sum.width, height: sum.height + step * 0.7)
+            let dx: CGFloat = switch direction.horizontal {
+            case .left?: -step
+            case .right?: step
+            default: 0
             }
+            let dy: CGFloat = switch direction.vertical {
+            case .up?: -step * 0.7
+            case .down?: step * 0.7
+            default: 0
+            }
+            return CGSize(width: sum.width + dx, height: sum.height + dy)
         }
     }
 }
