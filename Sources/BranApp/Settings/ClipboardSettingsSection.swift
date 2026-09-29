@@ -26,81 +26,22 @@ struct ClipboardSettingsSection: View {
 
     var body: some View {
         Section("Presse-papiers") {
-            Text("Tout ce que vous copiez est rangé sur ce Mac, et un raccourci rouvre la liste. Rien ne part ailleurs : la bibliothèque est un dossier de fichiers, à côté des enregistrements.")
-                .font(Type.meta)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            GlobalTriggerRow(model: model, trigger: .clipboard)
-
-            Toggle("Conserver ce que je copie", isOn: Binding(
-                get: { settings.capturesCopies },
+            Toggle("Historique du presse-papiers", isOn: Binding(
+                get: { settings.isEnabled },
                 set: {
-                    settings.capturesCopies = $0
+                    settings.isEnabled = $0
                     model.clipboard.applySettings()
                 }
             ))
 
-            Text(captureHint)
+            Text(enabledHint)
                 .font(Type.meta)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // **Le libellé était une constante, et il mentait.**
-            //
-            // `ClipboardRetention.textLabel` vaut « Texte conservé
-            // indéfiniment », écrit en dur. Le moteur, lui, a reçu une durée par
-            // défaut d'un an : l'écran promettait donc de tout garder pendant
-            // que la purge se préparait à effacer. Deux relectures externes
-            // indépendantes ont trouvé le même écart, et c'est bien une perte de
-            // données silencieuse.
-            //
-            // Il affiche maintenant ce que la politique dit réellement, et le
-            // choix est offert plutôt qu'imposé — avec « indéfiniment » comme
-            // défaut, parce qu'effacer un an d'historique derrière le dos de
-            // quelqu'un est pire que le garder.
-            Picker("Texte copié", selection: Binding(
-                get: { settings.textDays },
-                set: {
-                    settings.textDays = $0
-                    model.clipboard.applySettings()
-                }
-            )) {
-                ForEach(ClipboardRetention.offeredTextDays, id: \.self) { days in
-                    Text(ClipboardRetention(blobDays: settings.blobDays, textDays: days).textDaysLabel)
-                        .tag(days)
-                }
+            if settings.isEnabled {
+                options
             }
-
-            Picker("Conserver les contenus lourds", selection: Binding(
-                get: { settings.blobDays },
-                set: {
-                    settings.blobDays = $0
-                    model.clipboard.applySettings()
-                }
-            )) {
-                ForEach(ClipboardRetention.offeredDays, id: \.self) { days in
-                    Text(ClipboardRetention.days(days).label).tag(days)
-                }
-            }
-
-            Text(retentionHint)
-                .font(Type.meta)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Toggle("Ignorer les copies marquées confidentielles", isOn: Binding(
-                get: { settings.honoursPrivacyMarkers },
-                set: {
-                    settings.honoursPrivacyMarkers = $0
-                    model.clipboard.applySettings()
-                }
-            ))
-
-            Text(privacyHint)
-                .font(Type.meta)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             // Le même bandeau que les trois autres bibliothèques, et au même
             // endroit : ce qui empêche d'écrire ou de relire se dit là où l'on
@@ -114,7 +55,93 @@ struct ClipboardSettingsSection: View {
         }
     }
 
+    /// Tout ce qui ne veut rien dire tant que la fonction est éteinte.
+    ///
+    /// Masqué plutôt que grisé : un raccourci grisé laisse croire qu'il est
+    /// encore réservé, alors qu'il vient justement d'être rendu.
+    @ViewBuilder
+    private var options: some View {
+        GlobalTriggerRow(model: model, trigger: .clipboard)
+
+        Toggle("Conserver ce que je copie", isOn: Binding(
+            get: { settings.capturesCopies },
+            set: {
+                settings.capturesCopies = $0
+                model.clipboard.applySettings()
+            }
+        ))
+
+        Text(captureHint)
+            .font(Type.meta)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+        // **Le libellé était une constante, et il mentait.**
+        //
+        // `ClipboardRetention.textLabel` vaut « Texte conservé
+        // indéfiniment », écrit en dur. Le moteur, lui, a reçu une durée par
+        // défaut d'un an : l'écran promettait donc de tout garder pendant
+        // que la purge se préparait à effacer. Deux relectures externes
+        // indépendantes ont trouvé le même écart, et c'est bien une perte de
+        // données silencieuse.
+        //
+        // Il affiche maintenant ce que la politique dit réellement, et le
+        // choix est offert plutôt qu'imposé — avec « indéfiniment » comme
+        // défaut, parce qu'effacer un an d'historique derrière le dos de
+        // quelqu'un est pire que le garder.
+        Picker("Texte copié", selection: Binding(
+            get: { settings.textDays },
+            set: {
+                settings.textDays = $0
+                model.clipboard.applySettings()
+            }
+        )) {
+            ForEach(ClipboardRetention.offeredTextDays, id: \.self) { days in
+                Text(ClipboardRetention(blobDays: settings.blobDays, textDays: days).textDaysLabel)
+                    .tag(days)
+            }
+        }
+
+        Picker("Conserver les contenus lourds", selection: Binding(
+            get: { settings.blobDays },
+            set: {
+                settings.blobDays = $0
+                model.clipboard.applySettings()
+            }
+        )) {
+            ForEach(ClipboardRetention.offeredDays, id: \.self) { days in
+                Text(ClipboardRetention.days(days).label).tag(days)
+            }
+        }
+
+        Text(retentionHint)
+            .font(Type.meta)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+        Toggle("Ignorer les copies marquées confidentielles", isOn: Binding(
+            get: { settings.honoursPrivacyMarkers },
+            set: {
+                settings.honoursPrivacyMarkers = $0
+                model.clipboard.applySettings()
+            }
+        ))
+
+        Text(privacyHint)
+            .font(Type.meta)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     // MARK: -
+
+    /// Ce que l'interrupteur principal fait — et, éteint, ce qu'il ne fait pas.
+    private var enabledHint: String {
+        if settings.isEnabled {
+            return "Tout ce que vous copiez est rangé sur ce Mac, et un raccourci rouvre la liste. Rien ne part ailleurs : la bibliothèque est un dossier de fichiers, à côté des enregistrements."
+        }
+        return "Désactivé : rien n'est plus écrit, le raccourci est rendu à macOS et le panneau ne s'ouvre plus. Ce qui était déjà rangé reste sur le disque, et revient tel quel si vous réactivez."
+    }
 
     /// Ce que l'interrupteur de capture fait, et surtout ce qu'il ne fait pas.
     ///

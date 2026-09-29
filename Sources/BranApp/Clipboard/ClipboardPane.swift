@@ -127,13 +127,17 @@ struct ClipboardPane: View {
 
             Divider()
 
-            toolbar(result)
+            if model.clipboardSettings.isEnabled {
+                toolbar(result)
 
-            Divider()
+                Divider()
 
-            notices
+                notices
 
-            content(result)
+                content(result)
+            } else {
+                disabled
+            }
         }
         .task {
             if paster == nil { paster = Paster() }
@@ -410,6 +414,25 @@ struct ClipboardPane: View {
         if model.clipboardSettings.capturesCopies == false { parts.append("capture éteinte") }
         if let problem = store.problem { parts.append(problem) }
         return parts.joined(separator: "|")
+    }
+
+    /// La fonction éteinte : rien n'est montré, pas même l'historique déjà
+    /// rangé. C'est ce que l'interrupteur promet, et la phrase dit que le
+    /// disque, lui, n'a rien perdu.
+    private var disabled: some View {
+        ContentUnavailableView {
+            Label("Presse-papiers désactivé", systemImage: "clipboard")
+        } description: {
+            Text("Rien n'est capturé, le raccourci est libre et l'historique est masqué. Ce qui était déjà rangé reste sur le disque et revient si vous réactivez.")
+        } actions: {
+            Button("Activer") {
+                model.clipboardSettings.isEnabled = true
+                controller.applySettings()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .branWidthFloor()
+        .frame(maxHeight: .infinity)
     }
 
     // MARK: - La liste et ses deux absences
@@ -1135,11 +1158,13 @@ struct ClipboardStatusChip: View {
     }
 
     private var color: Color {
-        model.clipboardSettings.capturesCopies ? Palette.done : Palette.asleep
+        model.clipboardSettings.isEnabled && model.clipboardSettings.capturesCopies
+            ? Palette.done : Palette.asleep
     }
 
     private var label: String {
-        model.clipboardSettings.capturesCopies
+        guard model.clipboardSettings.isEnabled else { return "désactivé" }
+        return model.clipboardSettings.capturesCopies
             ? "\(model.clipboardSettings.trigger.displayName) · en veille"
             : "capture désactivée"
     }

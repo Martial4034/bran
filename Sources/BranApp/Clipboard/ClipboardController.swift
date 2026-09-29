@@ -181,6 +181,13 @@ final class ClipboardController {
         self.thumbnails = ThumbnailCache(store: store)
     }
 
+    /// Écrire maintenant : la fonction est allumée **et** la capture aussi.
+    ///
+    /// Les deux interrupteurs sont lus ensemble partout où l'on décide
+    /// d'écrire, pour qu'éteindre la fonction arrête la capture sans toucher au
+    /// choix « Conserver ce que je copie », retrouvé intact au rallumage.
+    private var capturing: Bool { settings.isEnabled && settings.capturesCopies }
+
     // MARK: - Démarrage
 
     /// Charge la bibliothèque, fait le ménage différé, inscrit le raccourci et
@@ -203,17 +210,17 @@ final class ClipboardController {
         // deux autres fonctions l'appellent depuis leur propre interrupteur —
         // `DictationController.setEnabled`, `AppModel.enableSnapshot` — de sorte
         // que le tap existait « par accident » dès que l'une d'elles était
-        // active. Le presse-papiers, lui, n'a pas d'interrupteur : sans cet
-        // appel, quelqu'un qui a désactivé la dictée et la capture de texte
-        // aurait un ⌘⇧C et un indice ⌘C parfaitement inertes, un sondage qui
-        // tourne quand même, et donc un historique à moitié vivant sans qu'un
-        // seul message ne le dise.
+        // active. Le presse-papiers le pose lui-même dès qu'il est allumé :
+        // sans cet appel, quelqu'un qui a désactivé la dictée et la capture de
+        // texte aurait un ⌘⇧C et un indice ⌘C parfaitement inertes, un sondage
+        // qui tourne quand même, et donc un historique à moitié vivant sans
+        // qu'un seul message ne le dise. Éteint, il ne pose rien.
         //
         // L'échec n'est pas signalé ici : il ne peut vouloir dire qu'une chose,
         // l'Accessibilité manque, et c'est l'écran des autorisations qui la
         // réclame. Le sondage, lui, continue de tenir l'historique à jour sans
         // aucune autorisation — c'est même sa deuxième raison d'exister.
-        _ = monitor.install()
+        if settings.isEnabled { _ = monitor.install() }
 
         Task {
             // **Le raccord des écritures internes, posé avant tout le reste.**
@@ -235,7 +242,7 @@ final class ClipboardController {
             // le premier tour du sondeur traitait sa mesure comme la référence
             // et non comme un événement. Publier d'abord arme les deux voies
             // avant que quoi que ce soit de lent ne commence.
-            if settings.capturesCopies {
+            if capturing {
                 publish(changeCount: await pasteboardAccess.changeCount())
             }
 
@@ -248,7 +255,7 @@ final class ClipboardController {
             await store.collectOrphanedBlobs()
             await thumbnails.sweep()
             hasLoaded = true
-            if settings.capturesCopies { startPolling() }
+            if capturing { startPolling() }
         }
     }
 
@@ -274,14 +281,20 @@ final class ClipboardController {
     /// la rétention, la machine pour la matrice des types, les deux voies
     /// d'observation pour l'interrupteur de capture.
     func applySettings() {
-        // Le raccourci est inscrit dans tous les cas, capture éteinte comprise :
-        // ⌘⇧C ouvre l'historique déjà rangé, et cesser d'écrire ne doit pas
-        // empêcher de lire.
-        monitor?.bind(.clipboard, to: settings.trigger)
+        // Le raccourci est inscrit dès que la fonction est allumée, capture
+        // éteinte comprise : ⌘⇧C ouvre l'historique déjà rangé, et cesser
+        // d'écrire ne doit pas empêcher de lire. Fonction éteinte, en revanche,
+        // la touche est rendue — c'est tout l'objet de `isEnabled`.
+        monitor?.bind(.clipboard, to: settings.isEnabled ? settings.trigger : nil)
+        if settings.isEnabled {
+            if monitor?.isInstalled == false { _ = monitor?.install() }
+        } else {
+            panel.close()
+        }
         store.setRetention(settings.retention)
         machine.policy = settings.typePolicy
 
-        guard settings.capturesCopies else {
+        guard capturing else {
             // `stop()` désarme les deux voies d'un coup : il annule le sondeur
             // et rend `nil` au guet, ce qui suffit à éteindre l'indice clavier —
             // sans référence publiée, le tap ne relaie plus rien, voir
@@ -303,7 +316,7 @@ final class ClipboardController {
             // recommenceraient à être capturées alors que le réglage dit non.
             // C'est la règle générale de ce fichier : après un `await`, « rien
             // n'a changé » est une question, jamais une supposition.
-            guard let self, self.settings.capturesCopies, self.polling == nil else { return }
+            guard let self, self.capturing, self.polling == nil else { return }
             self.publish(changeCount: count)
             self.startPolling()
         }
@@ -322,6 +335,7 @@ final class ClipboardController {
 
     /// Le raccourci d'ouverture du panneau.
     func openRequested() {
+        guard settings.isEnabled else { return }
         panel.toggle()
     }
 
@@ -447,7 +461,7 @@ final class ClipboardController {
     /// Rallumer une capture que le réglage a éteinte serait exactement le
     /// contraire de ce que l'interrupteur promet.
     private func restartPolling() {
-        guard polling != nil, settings.capturesCopies else { return }
+        guard polling != nil, capturing else { return }
         startPolling()
     }
 

@@ -38,6 +38,7 @@ final class ClipboardSettings {
         /// commentaire de classe : la renommer effacerait le raccourci de tous
         /// ceux qui l'ont déjà changé.
         static let trigger = "bran.clipboard.trigger"
+        static let isEnabled = "bran.clipboard.isEnabled"
         static let capturesCopies = "bran.clipboard.capturesCopies"
         static let blobDays = "bran.clipboard.blobDays"
         static let textDays = "bran.clipboard.textDays"
@@ -52,6 +53,19 @@ final class ClipboardSettings {
     /// `GlobalTriggerRegistry`, avec celles de ses deux aînés, pour que la liste
     /// des fonctions réglables se lise en un seul endroit.
     var trigger: HotkeyBinding { didSet { store(trigger, forKey: Key.trigger) } }
+
+    /// La fonction entière, allumée ou éteinte : capture, raccourci et panneau.
+    ///
+    /// **Arrivé après `capturesCopies`, et contre ce que son commentaire
+    /// défendait.** L'argument tenait — cesser d'écrire ne doit pas empêcher de
+    /// relire — mais il ne laissait aucun moyen de rendre le raccourci à macOS
+    /// ni de faire taire l'historique pour de bon, et le propriétaire l'a
+    /// demandé explicitement. Les deux réglages coexistent donc : celui-ci
+    /// désarme tout, l'autre ne fait qu'arrêter l'écriture.
+    ///
+    /// Éteindre ne supprime **rien** du disque : la bibliothèque reste où elle
+    /// est, et la rallumer rend l'historique tel qu'on l'a laissé.
+    var isEnabled: Bool { didSet { defaults.set(isEnabled, forKey: Key.isEnabled) } }
 
     /// Écrire, ou ne rien écrire du tout.
     ///
@@ -166,6 +180,7 @@ final class ClipboardSettings {
         // fidèlement un choix que personne n'a fait. Même précaution pour
         // `blobDays`, où `integer(forKey:)` rendrait 0 — c'est-à-dire « aucun
         // contenu lourd conservé », le contraire du défaut voulu.
+        isEnabled = defaults.object(forKey: Key.isEnabled) as? Bool ?? true
         capturesCopies = defaults.object(forKey: Key.capturesCopies) as? Bool ?? true
         blobDays = defaults.object(forKey: Key.blobDays) as? Int
             ?? ClipboardRetention.default.blobDays

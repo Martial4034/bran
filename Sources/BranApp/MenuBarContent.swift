@@ -58,7 +58,9 @@ struct MenuBarContent: View {
                 historyButton("Réunions", pane: .meetings)
                 historyButton("Dictées", pane: .dictation)
                 historyButton("Captures", pane: .snapshots)
-                historyButton("Presse-papiers", pane: .clipboard)
+                if model.clipboardSettings.isEnabled {
+                    historyButton("Presse-papiers", pane: .clipboard)
+                }
             }
         }
 
