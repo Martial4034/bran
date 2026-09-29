@@ -512,9 +512,13 @@ public final class AppModel {
         // Vision est vérifié au lancement sur une image fabriquée en mémoire.
         // Cent millisecondes, aucune capture d'écran, et une ligne de journal qui
         // dirait immédiatement si le moteur redevenait muet.
-        snapshot.selfTest("au démarrage")
-
+        //
+        // **Seulement si la fonction est allumée.** L'autotest charge les
+        // modèles de reconnaissance de texte, et ils restent en mémoire : les
+        // payer au démarrage pour une fonction éteinte, c'est exactement ce que
+        // l'interrupteur promet de ne pas faire.
         if snapshotSettings.isEnabled {
+            snapshot.selfTest("au démarrage")
             enableSnapshot(true)
         }
 
