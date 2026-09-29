@@ -26,10 +26,17 @@ struct TrackpadGroupsTests {
         #expect(byGroup[.dock] == [.quitApp])
     }
 
-    @Test("↑↑ reste avec les glissés simples, ↓ puis → va dans les quarts")
+    @Test("↑↑ reste avec les glissés simples, ↘ va dans les quarts")
     func doubleSwipeIsNotAQuarter() {
         #expect(TrackpadGroup.of(GestureCatalog.entry(for: .topHalf)!) == .titlebar)
         #expect(TrackpadGroup.of(GestureCatalog.entry(for: .bottomRightQuarter)!) == .quarters)
+    }
+
+    @Test("Les cartes des quarts montrent la diagonale")
+    func quarterCardsShowTheDiagonal() {
+        #expect(GestureCatalog.entry(for: .bottomRightQuarter)!.triggers[0] == .swipes([.downRight]),
+                "la carte montre ↘")
+        #expect(GestureCatalog.entry(for: .topLeftQuarter)!.triggers[0].symbols == "↖")
     }
 
     @Test("Un groupe vide n'est pas affiché")
