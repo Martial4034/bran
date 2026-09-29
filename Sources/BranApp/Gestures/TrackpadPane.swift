@@ -163,7 +163,48 @@ struct TrackpadPane: View {
                     }
                 }
             }
+
+            if group == .tap {
+                centerSizeControl
+            }
         }
+    }
+
+    // MARK: - Taille de la fenêtre centrée
+
+    /// Par pas de 5 % : une valeur ronde se lit mieux qu'un 63,8 %.
+    private var centerScale: Binding<Double> {
+        Binding(
+            get: { tuning.centerScale },
+            set: { tuning.centerScale = ($0 * 20).rounded() / 20 }
+        )
+    }
+
+    private var centerSizeControl: some View {
+        VStack(alignment: .leading, spacing: Space.small) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Taille de la fenêtre centrée")
+                Spacer()
+                Text(tuning.centerScale.formatted(.percent.precision(.fractionLength(0))))
+                    .font(Type.code)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            Slider(value: centerScale, in: WindowLayout.centerScaleRange) {
+                EmptyView()
+            } minimumValueLabel: {
+                Text("10 %").font(Type.meta).foregroundStyle(.secondary)
+            } maximumValueLabel: {
+                Text("100 %").font(Type.meta).foregroundStyle(.secondary)
+            }
+            .labelsHidden()
+            note("La part de l'écran que prend la fenêtre, centrée. La carte au-dessus suit le réglage.")
+        }
+        .padding(Space.card)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .disabled(!tuning.isEnabled(.centerReduced))
+        .opacity(tuning.isEnabled(.centerReduced) ? 1 : 0.5)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Fenêtres liées

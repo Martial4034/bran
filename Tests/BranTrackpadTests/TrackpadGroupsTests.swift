@@ -18,24 +18,32 @@ struct TrackpadGroupsTests {
     @Test("Les groupes, dans l'ordre de lecture")
     func groups() {
         let groups = TrackpadGroup.grouped()
-        #expect(groups.map(\.group) == [.titlebar, .quarters, .pinch, .dock])
+        #expect(groups.map(\.group) == [.titlebar, .quarters, .pinch, .tap, .dock])
         let byGroup = Dictionary(uniqueKeysWithValues: groups.map { ($0.group, Set($0.entries.map(\.action))) })
         #expect(byGroup[.titlebar] == [.leftHalf, .rightHalf, .maximize, .minimize, .topHalf, .bottomHalf])
         #expect(byGroup[.quarters] == [.topLeftQuarter, .topRightQuarter, .bottomLeftQuarter, .bottomRightQuarter])
-        #expect(byGroup[.pinch] == [.toggleFullScreen, .close])
+        #expect(byGroup[.pinch] == [.toggleFullScreen, .close, .quitWindowApp])
+        #expect(byGroup[.tap] == [.centerReduced])
         #expect(byGroup[.dock] == [.quitApp])
     }
 
-    @Test("↑↑ reste avec les glissés simples, ↓ puis → va dans les quarts")
+    @Test("↑↑ reste avec les glissés simples, ↘ va dans les quarts")
     func doubleSwipeIsNotAQuarter() {
         #expect(TrackpadGroup.of(GestureCatalog.entry(for: .topHalf)!) == .titlebar)
         #expect(TrackpadGroup.of(GestureCatalog.entry(for: .bottomRightQuarter)!) == .quarters)
     }
 
+    @Test("Les cartes des quarts montrent la diagonale")
+    func quarterCardsShowTheDiagonal() {
+        #expect(GestureCatalog.entry(for: .bottomRightQuarter)!.triggers[0] == .swipes([.downRight]),
+                "la carte montre ↘")
+        #expect(GestureCatalog.entry(for: .topLeftQuarter)!.triggers[0].symbols == "↖")
+    }
+
     @Test("Un groupe vide n'est pas affiché")
     func emptyGroupHidden() {
         let entries = GestureCatalog.entries.filter { $0.target == .titlebar }
-        #expect(TrackpadGroup.grouped(entries).map(\.group) == [.titlebar, .quarters, .pinch])
+        #expect(TrackpadGroup.grouped(entries).map(\.group) == [.titlebar, .quarters, .pinch, .tap])
     }
 
     // MARK: - État et bouton d'un groupe
@@ -45,14 +53,15 @@ struct TrackpadGroupsTests {
         let pinch = GestureCatalog.entries.filter { TrackpadGroup.of($0) == .pinch }
         #expect(TrackpadGroupState(pinch, disabled: []) == .allEnabled)
         #expect(TrackpadGroupState(pinch, disabled: [.close, .minimize]) == .someEnabled)
-        #expect(TrackpadGroupState(pinch, disabled: [.close, .toggleFullScreen]) == .noneEnabled)
+        #expect(TrackpadGroupState(pinch, disabled: [.close, .toggleFullScreen]) == .someEnabled)
+        #expect(TrackpadGroupState(pinch, disabled: [.close, .toggleFullScreen, .quitWindowApp]) == .noneEnabled)
     }
 
     @Test("Couper un groupe ne touche pas aux autres gestes")
     func groupToggle() {
         let pinch = GestureCatalog.entries.filter { TrackpadGroup.of($0) == .pinch }
         let off = TrackpadToggles.setting(pinch, enabled: false, in: [.minimize])
-        #expect(off == [.minimize, .close, .toggleFullScreen])
+        #expect(off == [.minimize, .close, .toggleFullScreen, .quitWindowApp])
         let on = TrackpadToggles.setting(pinch, enabled: true, in: off)
         #expect(on == [.minimize], "« réduire », coupé à part, le reste")
     }
@@ -67,7 +76,7 @@ struct TrackpadGroupsTests {
     @Test("« Pincer » éteint : chaque pincement est coupé, y compris sur le Dock")
     func pinchMigration() {
         let result = TrackpadToggles.migrated(swipeEnabled: true, pinchEnabled: false, disabled: [.minimize])
-        #expect(result == [.minimize, .toggleFullScreen, .close, .quitApp])
+        #expect(result == [.minimize, .toggleFullScreen, .close, .quitApp, .quitWindowApp])
     }
 
     @Test("« Glisser » éteint : chaque glissé est coupé, quarts compris")
