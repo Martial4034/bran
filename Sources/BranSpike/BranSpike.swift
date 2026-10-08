@@ -51,6 +51,20 @@ struct BranSpike {
                     codec: codec
                 ).run()
 
+            case "overlap":
+                let first = Double(value(of: "--first", in: arguments) ?? "") ?? 180
+                let second = Double(value(of: "--second", in: arguments) ?? "") ?? 60
+                let scale = Double(value(of: "--scale", in: arguments) ?? "") ?? 2
+                let folder = try value(of: "--folder", in: arguments).map(URL.init(fileURLWithPath:))
+                    ?? FileStamp.storageRoot()
+                try await OverlapSpike(
+                    first: .seconds(first),
+                    second: .seconds(second),
+                    scale: scale,
+                    solo: arguments.contains("--solo"),
+                    folder: folder
+                ).run()
+
             case "inspect":
                 guard let path = arguments.first else { throw SpikeUsageError.missingPath }
                 try await FileReport.print(for: URL(fileURLWithPath: path))

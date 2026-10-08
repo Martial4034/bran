@@ -201,4 +201,33 @@ struct RecordingOutputWatchTests {
 
         #expect(watch.observeFinished() == .duplicate)
     }
+
+    // Une panne ne coupe la session que si elle la concerne : passé l'arrêt
+    // demandé, le segment s'écrit en arrière-plan et la session est peut-être
+    // déjà celle de la réunion suivante. Voir `CaptureDelegate.report`.
+    @Test("Seule une sortie qui enregistre encore concerne la session en cours")
+    func onlyALiveOutputConcernsTheSession() {
+        var watch = RecordingOutputWatch()
+        #expect(watch.isRecording)
+
+        watch.requestFinish()
+        #expect(watch.isRecording == false)
+
+        // `stopCapture()` refusé : la sortie enregistre toujours.
+        watch.cancelFinishRequest()
+        #expect(watch.isRecording)
+
+        watch.requestFinish()
+        _ = watch.observeFinished()
+        #expect(watch.isRecording == false)
+    }
+
+    @Test("Une sortie arrêtée par macOS ne concerne plus la session")
+    func externallyFinishedOutputIsNotLive() {
+        var watch = RecordingOutputWatch()
+
+        _ = watch.observeFinished()
+
+        #expect(watch.isRecording == false)
+    }
 }

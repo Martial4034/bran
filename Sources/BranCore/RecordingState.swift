@@ -1,9 +1,10 @@
 /// États de `RecordingEngine`.
 ///
-/// `.finalizing` n'est pas une élégance de machine à états : le spike de la
-/// Phase 1 a montré que `stopCapture()` rend la main plusieurs secondes avant
-/// que le `.mp4` existe. Sauter cet état, c'est déclarer terminé un
-/// enregistrement qui n'est pas encore écrit.
+/// `.finalizing` couvre l'arrêt du flux, et lui seul : quelques dizaines de
+/// millisecondes. L'écriture du `.mp4` par `replayd`, qui dure un tiers de la
+/// réunion, ne se passe plus dans la session mais dans le post-traitement —
+/// voir `CaptureBackend.stop()`. C'est ce qui permet de démarrer la réunion
+/// suivante pendant que la précédente s'écrit encore.
 public enum RecordingState: Equatable, Sendable {
     case idle
     case starting(MeetingRef)

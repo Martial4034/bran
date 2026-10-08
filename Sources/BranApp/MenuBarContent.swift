@@ -23,9 +23,11 @@ struct MenuBarContent: View {
         // se fait dans `begin` quel que soit le chemin : un seul bouton suffit
         // donc aux deux cas, sans rien perdre. Il n'ouvre aucune fenêtre.
         //
-        // Absent pendant une session et pendant la finalisation, comme avant :
-        // la machine ne l'accepterait pas. Présent pendant la fusion d'une
-        // réunion précédente, qui tourne hors du flux de capture.
+        // Absent pendant une session : la machine ne l'accepterait pas.
+        // **Présent pendant toute la chaîne de fin d'une réunion précédente,
+        // finalisation comprise** : depuis le 08/10/2026, celle-ci tourne hors
+        // de la session, et c'est précisément le moment où l'on en a besoin —
+        // le closing suivant commence pendant que le précédent s'écrit.
         if model.hasOpenSession == false, model.isFinalizing == false {
             Button("Démarrer l'enregistrement", systemImage: "record.circle") {
                 model.startPendingRecording()
@@ -105,62 +107,46 @@ struct MenuBarContent: View {
 
             // Au repos, plus rien ne suit l'état : le bouton de démarrage est
             // monté en tête du menu. Un séparateur ici en ferait deux d'affilée.
-            if isPilotable || model.isFinalizing || model.currentStep != nil {
+            if isPilotable || model.isFinalizing || model.hasBackgroundWork {
                 Divider()
             }
 
-        // **Ce que la chaîne de fin raconte, et les boutons, sont deux blocs
-        // séparés.** Les avoir mis dans la même chaîne de `else if` fabriquait
-        // un défaut discret : pendant qu'une compression tourne — vingt minutes
-        // sur une réunion d'une demi-heure — plus aucune session n'est ouverte,
-        // donc « Démarrer un enregistrement » tombait dans une branche qu'on
-        // n'atteignait jamais. Quelqu'un dont la réunion suivante commence cinq
-        // minutes après la précédente se retrouvait devant un menu qui ne
-        // proposait plus d'enregistrer, sans rien pour l'expliquer.
-        //
-        // Rien n'interdit d'enregistrer pendant que bran compresse : la
-        // compression tourne hors du flux de capture, c'est même la raison pour
-        // laquelle elle est lancée après la finalisation et pas pendant.
-            if isPilotable == false, model.isFinalizing || model.currentStep != nil {
-            // **Aucun bouton pendant la chaîne de fin.** « Mettre en pause » et
-            // « Arrêter et enregistrer le fichier » restaient offerts alors que
-            // la machine ne les accepte plus : cliquer ne produisait rien, pas
-            // même un message. Un utilisateur qui vient de cliquer « Arrêter »
-            // et à qui on continue de proposer « Arrêter » en conclut,
-            // légitimement, que son premier clic n'a pas été pris.
+            // **Une ligne par réunion en arrière-plan, même pendant qu'une autre
+            // s'enregistre.**
             //
-            // **Les trois étapes, et plus seulement la première.** Le bloc ne
-            // couvrait que la finalisation et disait une phrase écrite en dur ;
-            // la fusion et l'extraction de l'audio, qui durent ensemble bien
-            // plus longtemps, ne se voyaient nulle part une fois la fenêtre
-            // fermée. Or c'est **depuis le menu** qu'on surveille la fin d'une
-            // réunion : la fenêtre, on l'a refermée en raccrochant.
+            // Le bloc ne montrait que la plus ancienne, et seulement hors
+            // session. Les deux limites tenaient tant que la finalisation gardait
+            // la session ouverte : on ne pouvait pas enregistrer pendant qu'un
+            // fichier s'écrivait. Ce n'est plus le cas, et c'est **depuis le
+            // menu** qu'on surveille, pendant le closing de 15h, que celui de
+            // 14h30 est bien parti au CRM : la fenêtre, on l'a refermée en
+            // raccrochant.
             //
-            // **Ce que ces deux lignes ajoutent, et rien de plus.**
-            // `statusSummary`, quelques lignes au-dessus, vaut `step.summary`
-            // pendant toute la chaîne : l'étape y est déjà nommée, avec son
-            // pourcentage. La répéter ici ferait bégayer un menu qui tient sur un
-            // écran. Restent les deux choses qu'elle ne dit pas : **de quelle
-            // réunion** il s'agit — une compression peut tourner pendant qu'on en
-            // démarre une autre — et le détail, c'est-à-dire les octets écrits,
-            // le temps restant et la seule consigne, ne pas quitter bran.
-            //
-            // Sans nom de réunion, la première ligne retombe sur le titre de
-            // l'étape : le menu doit dire ce qui tourne même quand la réunion
-            // n'a jamais été nommée.
-            //
-            // La condition ne dépend pas de `currentStep` : la machine peut être
-            // en `.finalizing` une fraction de seconde avant que la chaîne
-            // publie sa première étape, et si le bloc n'avait tenu qu'à l'étape,
-            // le menu aurait proposé « Arrêter » pendant ce trou-là — c'est-à-dire
-            // exactement le défaut que ce bloc existe pour fermer. La phrase de
-            // repli dit ce qu'on sait alors, et rien de plus.
-                if let step = model.currentStep {
-                    Text(model.currentStepTitle.map { "Réunion — \($0)" } ?? step.title)
-                    Text(step.detail)
-                } else {
-                    Text("La capture est terminée, le fichier s'écrit. Ne quittez pas bran.")
-                }
+            // Deux lignes par réunion : laquelle, et ce qu'elle fait ; puis le
+            // détail — octets écrits, temps restant, et la seule consigne, ne
+            // pas quitter bran. Aucun bouton : il n'y a rien à décider, et les
+            // commandes de la session en cours, plus bas, restent les seules.
+            ForEach(model.backgroundSteps) { background in
+                Text("\(background.displayTitle) — \(background.step.summary)")
+                Text(background.step.detail)
+            }
+
+            // Puis celles que le CRM traite. Une ligne suffit : il n'y a plus de
+            // fichier local en jeu, donc plus de consigne à donner.
+            ForEach(model.backgroundUploads) { upload in
+                Text("\(upload.title) — \(upload.status)")
+            }
+
+            // L'arrêt du flux lui-même : quelques dizaines de millisecondes
+            // pendant lesquelles la machine n'accepte plus rien et la chaîne
+            // n'a pas encore publié sa première étape. La phrase dit ce qu'on
+            // sait alors, et évite de proposer « Arrêter » une seconde fois.
+            if model.isFinalizing, model.backgroundSteps.isEmpty {
+                Text("La capture s'arrête, le fichier va s'écrire. Ne quittez pas bran.")
+            }
+
+            if isPilotable, model.hasBackgroundWork {
+                Divider()
             }
 
             // Les commandes. La finalisation est le seul état où il n'y en a
@@ -241,8 +227,7 @@ struct MenuBarContent: View {
     private var showsRecordingSection: Bool {
         showsRecording
             || model.hasOpenSession
-            || model.isFinalizing
-            || model.currentStep != nil
+            || model.hasBackgroundWork
             || model.pendingMeeting != nil
             || model.lastFailure != nil
     }

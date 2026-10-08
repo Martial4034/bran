@@ -49,6 +49,11 @@ final class CaptureSignals: Sendable {
         storage.withLock { $0.outputWatch.cancelFinishRequest() }
     }
 
+    /// Voir `RecordingOutputWatch.isRecording`.
+    var isRecording: Bool {
+        storage.withLock { $0.outputWatch.isRecording }
+    }
+
     var failure: String? {
         storage.withLock { $0.failure }
     }

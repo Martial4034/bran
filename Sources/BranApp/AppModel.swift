@@ -720,7 +720,18 @@ public final class AppModel {
         // d'une réunion. « Compression en cours… » sans étape ni pourcentage
         // était indiscernable d'un blocage — et pendant la finalisation ou
         // l'extraction de l'audio, le menu ne disait rien du tout.
-        if let step = currentStep { return step.summary }
+        //
+        // **Sauf pendant une session**, depuis que la réunion suivante peut
+        // démarrer pendant que la précédente se finalise. La chaîne de fin
+        // passait devant l'enregistrement en cours : le menu annonçait
+        // « Finalisation de l'enregistrement — 1,2 Go écrits » pendant qu'on
+        // enregistrait le closing suivant, sans rien dire de celui-ci. Les
+        // étapes de fond se lisent alors dans `backgroundSteps`, une ligne par
+        // réunion.
+        if hasOpenSession == false, hasBackgroundWork {
+            let count = backgroundSteps.count + backgroundUploads.count
+            return count > 1 ? "\(count) réunions en arrière-plan" : "1 réunion en arrière-plan"
+        }
 
         return switch engine.state {
         case .recording:
@@ -730,7 +741,7 @@ public final class AppModel {
         case .starting:
             "Démarrage…"
         case .finalizing:
-            "Finalisation du fichier…"
+            "Arrêt de la capture…"
         case .failed(let reason):
             "Échec — \(reason)"
         case .idle:
@@ -755,13 +766,13 @@ public final class AppModel {
         if case .paused = engine.state { true } else { false }
     }
 
-    /// La capture est finie, `replayd` écrit encore.
+    /// Le flux de capture est en train de s'arrêter.
     ///
-    /// C'est l'état le plus long d'une fin de session — mesuré à un tiers de la
-    /// durée enregistrée — et c'était le seul que l'interface ne montrait
-    /// jamais. L'utilisateur cliquait « Arrêter », voyait la barre se figer,
-    /// recliquait, puis lisait « Échec » : trois signaux faux pour un travail
-    /// qui se déroulait normalement.
+    /// Quelques dizaines de millisecondes depuis le 08/10/2026 : l'écriture du
+    /// fichier par `replayd`, qui dure un tiers de la réunion et que cet état
+    /// couvrait autrefois, est devenue la première étape de la chaîne de fin —
+    /// voir `postProcess`. L'état reste, parce que la machine n'accepte ni pause
+    /// ni arrêt pendant ce temps et que l'interface ne doit pas les proposer.
     public var isFinalizing: Bool {
         if case .finalizing = engine.state { true } else { false }
     }
@@ -865,11 +876,10 @@ public final class AppModel {
 
     /// L'étape à montrer, ou `nil` quand il n'y a rien en cours.
     ///
-    /// La finalisation est fabriquée ici plutôt que rangée dans `pipeline` :
-    /// elle appartient à `RecordingEngine`, pas au post-traitement, et la
-    /// dupliquer dans le dictionnaire créerait deux sources de vérité pour un
-    /// état que la machine connaît déjà. Le reste de l'application n'a pas à
-    /// savoir que la chaîne a deux propriétaires.
+    /// La finalisation est rangée dans `pipeline` comme les autres étapes
+    /// depuis qu'elle tourne hors de la session. Le cas fabriqué ici ne couvre
+    /// plus que l'arrêt du flux lui-même, l'instant où la machine est en
+    /// `.finalizing` et où la chaîne n'a pas encore publié sa première étape.
     public var currentStep: SessionProgress? {
         if isFinalizing {
             return SessionProgress(
@@ -880,6 +890,71 @@ public final class AppModel {
             )
         }
         return currentStepID.flatMap { pipeline[$0] }
+    }
+
+    /// Une réunion dont la chaîne de fin tourne, avec ce qu'elle fait.
+    public struct BackgroundStep: Identifiable, Equatable {
+        public let id: UUID
+        public let title: String?
+        public let step: SessionProgress
+
+        /// Le nom à afficher : celui de la réunion, ou à défaut ce qui la
+        /// distingue des autres — son heure de départ n'est pas connue ici,
+        /// l'étape l'est.
+        public var displayTitle: String {
+            let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? "Réunion sans titre" : trimmed
+        }
+    }
+
+    /// **Toutes** les chaînes de fin en cours, de la plus ancienne à la plus
+    /// récente.
+    ///
+    /// `currentStep` n'en montre qu'une, et c'était suffisant tant que la
+    /// finalisation tenait la session : on ne pouvait pas en avoir deux de
+    /// front. Depuis qu'une réunion s'enregistre pendant que la précédente
+    /// s'écrit, la question de l'utilisateur est « où en est **chacune** » — et
+    /// la plus ancienne seule laisse les autres travailler en silence.
+    public var backgroundSteps: [BackgroundStep] {
+        stepOrder.compactMap { id in
+            pipeline[id].map { BackgroundStep(id: id, title: stepNames[id], step: $0) }
+        }
+    }
+
+    /// Une réunion dont la chaîne locale est finie et que le CRM traite.
+    public struct BackgroundUpload: Identifiable, Equatable {
+        public let id: UUID
+        public let title: String
+        public let startedAt: Date
+        public let status: String
+    }
+
+    /// Les envois au CRM pas encore aboutis, de la réunion la plus ancienne à
+    /// la plus récente.
+    ///
+    /// La suite naturelle de `backgroundSteps` : une fois l'audio prêt, la
+    /// réunion quitte la chaîne locale et part au CRM, où transcription et
+    /// compte-rendu prennent encore quelques minutes. Sans cette liste, elle
+    /// disparaissait du menu à cet instant-là — c'est-à-dire avant que
+    /// l'utilisateur sache si elle était arrivée. Une réunion encore dans la
+    /// chaîne n'y figure pas : elle a déjà sa ligne.
+    var backgroundUploads: [BackgroundUpload] {
+        uploads.states.compactMap { id, state -> BackgroundUpload? in
+            guard state.isFinished == false, pipeline[id] == nil else { return nil }
+            let recording = store.recordings.first { $0.id == id }
+            return BackgroundUpload(
+                id: id,
+                title: recording?.displayTitle ?? "Réunion",
+                startedAt: recording?.metadata.startedAt ?? .distantPast,
+                status: "CRM : \(state.description)"
+            )
+        }
+        .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    /// Quelque chose tourne pour une réunion déjà close — localement ou au CRM.
+    var hasBackgroundWork: Bool {
+        backgroundSteps.isEmpty == false || backgroundUploads.isEmpty == false
     }
 
     /// De quelle réunion il s'agit. Quand la fenêtre est restée ouverte deux
@@ -1072,6 +1147,14 @@ public final class AppModel {
         verdict: StopVerdict,
         segments: [URL]
     ) async {
+        // Relevés AVANT `stopTicking`, qui les remet à zéro : c'est la durée
+        // réellement enregistrée, qui sert à estimer la finalisation, et
+        // l'heure réelle de l'arrêt. `endedAt` valait jusqu'ici l'heure de fin
+        // de la finalisation — le closing du 08/10 à 14h30 affichait 15:00:22,
+        // plusieurs minutes après le clic.
+        let recorded = elapsed
+        let stoppedAt = Date.now
+
         recordingStartedAt = nil
         pausedAt = nil
         stopTicking()
@@ -1079,7 +1162,12 @@ public final class AppModel {
         if let message = verdict.message { report(message) }
 
         if verdict.writesEndedAt {
-            await store.completeSession(id: meeting.id)
+            // **`endedAt` attend que le fichier soit écrit.** La session est
+            // close, mais `replayd` écrit encore l'essentiel du fichier — voir
+            // `CaptureSession.finishWriting`. Horodater maintenant, c'est
+            // présenter comme complète une réunion qu'un « Quitter » perdrait
+            // encore. Le post-traitement l'écrit dès que l'écriture aboutit.
+            if segments.isEmpty { await store.completeSession(id: meeting.id, endedAt: stoppedAt) }
         } else {
             // Pas de `completeSession` : l'absence de `endedAt` EST le signal.
             // Mais elle ne dit pas pourquoi, et le motif ne vivait jusqu'ici que
@@ -1107,14 +1195,28 @@ public final class AppModel {
             meeting.id,
             title: store.recordings.first { $0.id == meeting.id }?.metadata.title ?? meeting.title,
             segments: segments,
-            preservingSegments: verdict.writesEndedAt == false
+            recorded: recorded,
+            completingAt: verdict.writesEndedAt ? stoppedAt : nil
         )
     }
 
-    /// Fusion des segments, compression, puis préparation de l'audio du CRM.
+    /// Finalisation, fusion des segments, compression, puis préparation de
+    /// l'audio du CRM — **en arrière-plan**, pendant que la réunion suivante
+    /// peut déjà s'enregistrer.
     ///
-    /// Lancé après la finalisation, jamais pendant : encoder en parallèle d'une
-    /// capture volerait au flux le matériel vidéo dont il a besoin.
+    /// **La finalisation est la première étape de la chaîne depuis le
+    /// 08/10/2026**, et plus la dernière de la session. Elle gardait la session
+    /// ouverte pendant un tiers de la réunion, et deux closings enchaînés ne
+    /// pouvaient pas s'enregistrer : le bouton « Démarrer » restait masqué
+    /// cinq à six minutes après l'arrêt du premier. La fusion attend toujours
+    /// la finalisation — on ne recolle pas un fichier que `replayd` écrit
+    /// encore —, mais la session, elle, ne l'attend plus.
+    ///
+    /// - Parameters:
+    ///   - recorded: la durée enregistrée, d'où l'estimation de la finalisation.
+    ///   - completingAt: l'heure de l'arrêt, à inscrire comme fin de session une
+    ///     fois le fichier écrit ; `nil` quand la session s'est mal terminée, et
+    ///     que la fiche doit garder sa sentinelle « interrompue ».
     ///
     /// **Le nom du dossier est aligné ici, et pas ailleurs.** C'est le premier
     /// instant où le titre définitif est connu : la réunion a pu être nommée à la
@@ -1126,16 +1228,35 @@ public final class AppModel {
         _ id: UUID,
         title: String?,
         segments: [URL],
-        preservingSegments: Bool = false
+        recorded: Duration,
+        completingAt: Date?
     ) async {
         guard segments.isEmpty == false else { return }
 
+        // Inscrite avant le premier `await` : la ligne de bibliothèque, le menu
+        // et le garde de fermeture doivent voir la chaîne à l'instant où la
+        // session se ferme, pas une boucle d'événements plus tard.
         stepOrder.append(id)
         stepNames[id] = title
         defer {
             pipeline[id] = nil
             stepOrder.removeAll { $0 == id }
             stepNames[id] = nil
+        }
+
+        var preservingSegments = completingAt == nil
+
+        if let failure = await finishWriting(id, segments: segments, recorded: recorded) {
+            // Le même traitement qu'un arrêt en échec, et pour les mêmes
+            // raisons — voir `concludeSession` : la fiche garde sa sentinelle
+            // et reçoit le motif, les morceaux bruts sont conservés, et rien ne
+            // part tout seul au CRM.
+            let verdict = StopVerdict.failed(reason: failure)
+            if let message = verdict.message { report(message) }
+            await store.mutate(id) { $0.interruptionReason = failure }
+            preservingSegments = true
+        } else if let completingAt {
+            await store.completeSession(id: id, endedAt: completingAt)
         }
 
         let folder = await store.alignFolderName(for: id)
@@ -1214,6 +1335,43 @@ public final class AppModel {
         }
 
         await store.reload()
+    }
+
+    /// Attend que `replayd` ait écrit les segments, en publiant ce qui avance.
+    ///
+    /// `replayd` ne rapporte aucune fraction : le seul signe de vie est le
+    /// poids des fichiers, relevé chaque seconde, et le temps écoulé, qui fait
+    /// décroître l'estimation tirée de la durée enregistrée.
+    ///
+    /// - Returns: le motif d'échec, ou `nil` si tous les segments sont écrits.
+    private func finishWriting(_ id: UUID, segments: [URL], recorded: Duration) async -> String? {
+        let startedAt = Date.now
+        let publish = { [weak self] in
+            guard let self else { return }
+            pipeline[id] = SessionProgress(
+                stage: .finalizing,
+                bytesWritten: segments.reduce(0) { $0 + Self.sizeOfFile(at: $1) },
+                recorded: recorded,
+                elapsed: .seconds(Int(Date.now.timeIntervalSince(startedAt)))
+            )
+        }
+        publish()
+
+        let ticker = Task { @MainActor in
+            while Task.isCancelled == false {
+                try? await Task.sleep(for: .seconds(1))
+                guard Task.isCancelled == false else { return }
+                publish()
+            }
+        }
+        defer { ticker.cancel() }
+
+        do {
+            try await capture.finishWriting(segments)
+            return nil
+        } catch {
+            return (error as? any LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     /// Extrait l'audio destiné au CRM et **le laisse à côté de la vidéo**.

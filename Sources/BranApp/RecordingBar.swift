@@ -41,7 +41,10 @@ struct RecordingBar: View {
     var body: some View {
         Group {
             if isPilotable {
-                controls
+                VStack(alignment: .leading, spacing: Space.small) {
+                    controls
+                    backgroundLine
+                }
             } else if let step = step {
                 stageView(step)
             }
@@ -101,21 +104,96 @@ struct RecordingBar: View {
         )
     }
 
+    // MARK: - Ce qui tourne derrière la session
+
+    /// **Les réunions précédentes qui s'écrivent encore, sous les commandes de
+    /// celle qu'on enregistre.**
+    ///
+    /// Depuis le 08/10/2026, un closing démarre pendant que le précédent se
+    /// finalise. Les commandes gagnent la barre — c'est la règle d'`isPilotable`
+    /// —, mais l'autre réunion ne doit pas disparaître pour autant : c'est
+    /// elle qu'on attend pour l'envoyer au CRM, et la voir avancer est ce qui
+    /// dissuade de quitter bran. Une ligne, bornée, et absente quand il n'y a
+    /// rien derrière : la barre ne grandit que quand elle a quelque chose à
+    /// dire.
+    @ViewBuilder
+    private var backgroundLine: some View {
+        let steps = model.backgroundSteps
+        if let first = steps.first {
+            let others = steps.count - 1
+            HStack(spacing: Space.tight) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityHidden(true)
+                Text(
+                    "En arrière-plan : \(first.displayTitle) — \(first.step.summary)"
+                    + (others > 0 ? " (et \(others) autre\(others > 1 ? "s" : ""))" : "")
+                )
+                .lineLimit(1)
+                .truncationMode(.middle)
+            }
+            .font(Type.meta)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+    }
+
     // MARK: - La chaîne de fin
 
     /// Ce que voit l'utilisateur entre le clic sur « Arrêter » et le fichier
     /// utilisable — pour les **trois** travaux, et plus seulement pour le
     /// premier.
     ///
-    /// Il n'y a aucun bouton parce qu'il n'y a plus rien à décider : seulement à
-    /// attendre, et à savoir que l'attente est normale, laquelle des trois étapes
-    /// la cause, et combien de temps elle dure.
+    /// Rien à décider sur cette réunion-là : seulement à attendre, et à savoir
+    /// que l'attente est normale, laquelle des étapes la cause, et combien de
+    /// temps elle dure. Le seul bouton concerne **la suivante** — voir
+    /// `nextRecordingButton`.
     ///
     /// **Le nom de la réunion est affiché, et ce n'est pas du décor.** La fenêtre
     /// peut être restée ouverte deux heures et trois réunions ; « Fusion et
     /// compression de la vidéo… » tout seul ne dit pas laquelle, donc ne dit pas
     /// si c'est celle qu'on attend pour l'envoyer au CRM.
     private func stageView(_ step: SessionProgress) -> some View {
+        HStack(spacing: Space.stack) {
+            stageSummary(step)
+
+            Spacer(minLength: Space.inset)
+
+            nextRecordingButton
+        }
+    }
+
+    /// **Le bouton qui manquait le 08/10/2026.**
+    ///
+    /// Deux closings s'enchaînaient, 14h30 puis 15h. Le premier s'est arrêté à
+    /// 15:00:19, sa finalisation a pris trois secondes, puis la fusion a tourné
+    /// de 15:00:22 à 15:10:39. Pendant ces dix minutes, bran acceptait un
+    /// nouvel enregistrement, mais la fenêtre ne le proposait nulle part : sa
+    /// barre disait « Fusion et compression… ne quittez pas bran », sans un
+    /// seul bouton, et le seul « Démarrer » vivait dans la barre des menus. Le
+    /// second closing a été enregistré avec un autre outil.
+    ///
+    /// Le bouton est donc ici, à côté de ce qui tourne, et il dit ce qu'il
+    /// fait : la réunion détectée quand il y en a une, un enregistrement
+    /// simple sinon — le même choix que le bouton du menu. Éteint pendant les
+    /// quelques millisecondes où le flux précédent s'arrête : la machine
+    /// refuserait le départ.
+    private var nextRecordingButton: some View {
+        Button {
+            model.startPendingRecording()
+        } label: {
+            Label(
+                model.pendingMeeting != nil ? "Enregistrer la réunion détectée" : "Démarrer l'enregistrement",
+                systemImage: "record.circle"
+            )
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(model.hasOpenSession || model.permissions.canRecord == false)
+        .help("Le traitement de la réunion précédente continue en arrière-plan.")
+    }
+
+    private func stageSummary(_ step: SessionProgress) -> some View {
         HStack(spacing: Space.stack) {
             // Une roue **seulement quand rien ne se mesure**. Une roue qui tourne
             // et une jauge qui avance disent la même chose deux fois ; quand la
@@ -129,7 +207,7 @@ struct RecordingBar: View {
 
             VStack(alignment: .leading, spacing: Space.line) {
                 if let title = model.currentStepTitle {
-                    Text(title)
+                    Text("En arrière-plan — \(title)")
                         .font(Type.meta)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -154,6 +232,18 @@ struct RecordingBar: View {
                     .monospacedDigit()
                     .lineLimit(2)
 
+                // La plus ancienne est montrée ; les autres sont comptées, pour
+                // qu'une seconde réunion en cours d'écriture ne se cache pas
+                // derrière la première. Leur détail est sur leur ligne de
+                // bibliothèque et dans le menu.
+                if model.backgroundSteps.count > 1 {
+                    let others = model.backgroundSteps.count - 1
+                    Text("et \(others) autre\(others > 1 ? "s" : "") réunion\(others > 1 ? "s" : "") en arrière-plan")
+                        .font(Type.meta)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 if let fraction = step.fraction {
                     ProgressView(value: fraction)
                         .progressViewStyle(.linear)
@@ -168,8 +258,6 @@ struct RecordingBar: View {
                         .accessibilityHidden(true)
                 }
             }
-
-            Spacer(minLength: Space.inset)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(spokenStage(step))

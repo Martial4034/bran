@@ -130,6 +130,58 @@ public actor CaptureSession: CaptureBackend {
         try await closeCurrentSegment()
     }
 
+    /// Attend que `replayd` ait fini d'écrire chacun de ces segments.
+    ///
+    /// **C'est ici, et plus dans `stop()`, que se passent les minutes qui
+    /// suivent l'arrêt.** Le 08/10/2026, deux closings s'enchaînaient — 14h30
+    /// puis 15h — et bran a refusé de démarrer le second pendant cinq à six
+    /// minutes : `stop()` attendait la finalisation, la session restait donc en
+    /// `.finalizing`, et la machine n'accepte un `.start` qu'au repos. Rien
+    /// n'imposait pourtant cette attente : mesuré le même jour avec
+    /// `bran-spike overlap`, une capture s'ouvre en 0,3 s pendant que `replayd`
+    /// finalise la précédente, et les deux fichiers sortent complets.
+    ///
+    /// La session se ferme donc au rythme du flux, et le fichier au sien : le
+    /// post-traitement appelle cette méthode avant de toucher aux segments.
+    ///
+    /// Un segment absent de la table est un segment déjà écrit, ou qui n'a
+    /// jamais été ouvert par cette session — rien à attendre dans les deux cas.
+    /// Chaque attente est retirée de la table une fois rendue, bien ou mal.
+    ///
+    /// - Throws: `CaptureError.finalizationAbandoned` au premier segment dont
+    ///   l'écriture a échoué ou s'est tue. Les suivants sont **quand même
+    ///   attendus** : ce sont des minutes de réunion, et la fusion qui suit en
+    ///   récupère tout ce qui est lisible.
+    public func finishWriting(_ segments: [URL]) async throws {
+        var firstFailure: (any Error)?
+
+        for url in segments {
+            guard let finalization = finalizations[url] else { continue }
+            do {
+                try await finalization.value
+            } catch {
+                firstFailure = firstFailure ?? error
+            }
+            finalizations[url] = nil
+        }
+
+        if let firstFailure { throw firstFailure }
+    }
+
+    /// Les segments fermés dont `replayd` écrit encore le fichier, par URL.
+    ///
+    /// Une table et pas une seule tâche : une pause ferme un segment pendant
+    /// qu'on continue d'enregistrer, et une réunion qui s'arrête peut laisser
+    /// sa finalisation tourner pendant que la suivante commence.
+    private var finalizations: [URL: Task<Void, any Error>] = [:]
+
+    /// Le delegate et la sortie d'un segment dont la finalisation a échoué.
+    ///
+    /// Gardés en vie exprès : `SCRecordingOutput` ne tient son delegate que
+    /// faiblement, et un callback de fin tardif doit encore trouver quelqu'un.
+    /// Quelques objets par échec, sur toute la vie du processus.
+    private var abandoned: [(CaptureDelegate?, SCRecordingOutput?)] = []
+
     // MARK: - Segments
 
     private func openSegment() async throws -> URL {
@@ -215,11 +267,12 @@ public actor CaptureSession: CaptureBackend {
     ///
     /// Un acteur sérialise les *appels*, pas les *attentes* : dès le premier
     /// `await`, un second appel entre. Or une fermeture attend
-    /// `stream.stopCapture()` puis la finalisation, mesurée jusqu'à douze
-    /// minutes — la fenêtre de réentrance est donc énorme, et la référence au
-    /// flux n'est délibérément relâchée qu'à la fin. Pause puis Arrêter coup sur
-    /// coup faisaient donc `stopCapture()` deux fois sur le même `SCStream`,
-    /// puis deux attentes de finalisation sur le même fichier.
+    /// `stream.stopCapture()`, et la référence au flux n'est délibérément
+    /// relâchée qu'après. Pause puis Arrêter coup sur coup faisaient donc
+    /// `stopCapture()` deux fois sur le même `SCStream`. (La fenêtre était
+    /// autrement plus large quand la fermeture attendait aussi la
+    /// finalisation, jusqu'à douze minutes ; celle-ci vit désormais dans
+    /// `finalizations`, voir `finishWriting(_:)`.)
     ///
     /// Le second appelant partage la tâche du premier : il obtient le même
     /// résultat, la même erreur, au même moment. Rendre la main tout de suite
@@ -265,39 +318,51 @@ public actor CaptureSession: CaptureBackend {
 
         // `stopCapture()` rend la main **très** longtemps avant que le fichier
         // existe : mesuré le 11 août 2026, douze minutes sur une réunion de
-        // trente-six. Rendre la main ici sans attendre, c'est déclarer terminé
-        // un enregistrement dont 93 % reste à écrire.
+        // trente-six. Cette attente ne bloque plus la session — voir
+        // `finishWriting(_:)` —, mais elle reste due : rendre le fichier au
+        // post-traitement sans elle, c'est fusionner un enregistrement dont
+        // 93 % reste à écrire.
         //
-        // Le delegate est encore retenu pendant l'attente, et c'est
-        // indispensable : `SCRecordingOutput` ne le tient que faiblement, et
-        // c'est lui qui porte le signal de fin.
-        let destination = outputURL
+        // **La propriété du segment passe à sa tâche de finalisation.** Le
+        // delegate y est retenu pendant toute l'attente, et c'est indispensable :
+        // `SCRecordingOutput` ne le tient que faiblement, et c'est lui qui porte
+        // le signal de fin. Les champs de l'acteur sont libérés tout de suite,
+        // pour que le segment suivant — une reprise, ou la réunion suivante —
+        // ait les siens.
+        guard let destination = outputURL else { return }
         let recorded = segmentOpenedAt.map { ContinuousClock.now - $0 } ?? .zero
+        let signals = self.signals
+        let delegate = self.delegate
+        let recordingOutput = self.recordingOutput
+
         segmentOpenedAt = nil
-
-        let verdict = await signals.awaitFinish(
-            watch: FinalizationWatch(recorded: recorded),
-            bytesWritten: { Self.sizeOfFile(at: destination) }
-        )
-
-        // **Rien n'est lâché tant que la finalisation n'a pas abouti.** Le
-        // delegate et la sortie d'enregistrement étaient relâchés avant même de
-        // regarder le verdict : le callback de fin, qui finissait par arriver,
-        // ne trouvait plus personne, et une reprise de l'attente était devenue
-        // impossible. On garde donc les références sur un échec — elles ne
-        // coûtent rien, et elles sont la seule chance qu'un fichier tardif soit
-        // encore reconnu.
-        guard case .finished = verdict else {
-            throw CaptureError.finalizationAbandoned(
-                verdict.failureReason(formattedBytes: { $0.formatted(.byteCount(style: .file)) })
-                    ?? "raison inconnue",
-                bytesWritten: verdict.bytesWritten
-            )
-        }
-
         outputURL = nil
-        delegate = nil
-        recordingOutput = nil
+        self.delegate = nil
+        self.recordingOutput = nil
+
+        finalizations[destination] = Task {
+            let verdict = await signals.awaitFinish(
+                watch: FinalizationWatch(recorded: recorded),
+                bytesWritten: { Self.sizeOfFile(at: destination) }
+            )
+
+            // **Rien n'est lâché sur un échec.** Le callback de fin peut encore
+            // arriver ; il doit trouver son delegate vivant.
+            guard case .finished = verdict else {
+                self.keepAlive(delegate, recordingOutput)
+                throw CaptureError.finalizationAbandoned(
+                    verdict.failureReason(formattedBytes: { $0.formatted(.byteCount(style: .file)) })
+                        ?? "raison inconnue",
+                    bytesWritten: verdict.bytesWritten
+                )
+            }
+
+            withExtendedLifetime((delegate, recordingOutput)) {}
+        }
+    }
+
+    private func keepAlive(_ delegate: CaptureDelegate?, _ output: SCRecordingOutput?) {
+        abandoned.append((delegate, output))
     }
 
     /// Taille du fichier, ou zéro s'il n'existe pas encore. Un fichier absent

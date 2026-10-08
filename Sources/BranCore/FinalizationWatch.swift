@@ -57,6 +57,14 @@ public struct RecordingOutputWatch: Sendable {
     public mutating func observeFailure() {
         state = .finished
     }
+
+    /// La sortie enregistre encore : ni arrêt demandé, ni fin constatée.
+    ///
+    /// C'est la seule phase où une panne concerne **la session en cours**.
+    /// Après, elle concerne un fichier qui s'écrit en arrière-plan, pendant
+    /// que la réunion suivante a peut-être déjà démarré — la remonter comme
+    /// une panne de session couperait celle-ci pour une faute de l'autre.
+    public var isRecording: Bool { state == .recording }
 }
 
 /// Décide, à chaque coup de sonde, s'il faut continuer d'attendre la
