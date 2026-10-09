@@ -65,6 +65,19 @@ struct BranSpike {
                     folder: folder
                 ).run()
 
+            case "shrink":
+                guard let path = value(of: "--input", in: arguments),
+                      let folder = value(of: "--output", in: arguments)
+                else { throw SpikeUsageError.missingPath }
+                try await ShrinkSpike(
+                    input: URL(fileURLWithPath: path),
+                    output: URL(fileURLWithPath: folder),
+                    start: Double(value(of: "--start", in: arguments) ?? "") ?? 600,
+                    seconds: Double(value(of: "--seconds", in: arguments) ?? "") ?? 120,
+                    height: Int(value(of: "--height", in: arguments) ?? "") ?? 1080,
+                    bitrate: Int(value(of: "--bitrate", in: arguments) ?? "") ?? 1_000_000
+                ).run()
+
             case "inspect":
                 guard let path = arguments.first else { throw SpikeUsageError.missingPath }
                 try await FileReport.print(for: URL(fileURLWithPath: path))

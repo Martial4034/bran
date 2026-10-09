@@ -42,13 +42,9 @@ actor PostProcessor {
         }
     }
 
-    /// Bits par pixel et par image, pour du contenu d'écran en HEVC.
-    ///
-    /// Une réunion est majoritairement statique : des slides, une interface,
-    /// quelques vignettes qui bougent. 0,03 bit/pixel tient le texte net à cette
-    /// densité de mouvement. Monter au-dessus ne fait grossir le fichier sans
-    /// rien ajouter de visible.
-    private static let bitsPerPixelPerFrame = 0.03
+    // La définition et le débit de sortie ne se décident plus ici : voir
+    // `ReplayEncoding`. Les 0,03 bit/pixel d'avant gardaient la pleine
+    // définition de l'écran à ~10 Mbit/s — 1,8 Go pour un closing de 30 min.
 
     /// - Parameter preservingSegments: garde les morceaux bruts même après une
     ///   fusion réussie. Vrai quand la session s'est mal terminée : le fichier
@@ -237,7 +233,11 @@ actor PostProcessor {
         let frameRate = nominalRate > 1 ? Double(nominalRate) : 30
         let duration = try await asset.load(.duration).seconds
 
-        let bitrate = Int(Double(size.width) * Double(size.height) * frameRate * bitsPerPixelPerFrame)
+        let encoding = ReplayEncoding(
+            sourceWidth: Double(size.width),
+            sourceHeight: Double(size.height),
+            frameRate: frameRate
+        )
 
         // La destination est ici un brouillon dans un dossier neuf — voir
         // `process`. Le `removeItem` reste par prudence : rien n'interdit à un
@@ -248,15 +248,15 @@ actor PostProcessor {
         let reader = try AVAssetReader(asset: asset)
 
         let baseCompression: [String: Any] = [
-            AVVideoAverageBitRateKey: bitrate,
+            AVVideoAverageBitRateKey: encoding.bitrate,
             AVVideoMaxKeyFrameIntervalKey: Int(frameRate * 2),
             AVVideoExpectedSourceFrameRateKey: Int(frameRate),
         ]
         func videoSettings(_ compression: [String: Any]) -> [String: Any] {
             [
                 AVVideoCodecKey: AVVideoCodecType.hevc,
-                AVVideoWidthKey: Int(size.width),
-                AVVideoHeightKey: Int(size.height),
+                AVVideoWidthKey: encoding.width,
+                AVVideoHeightKey: encoding.height,
                 AVVideoCompressionPropertiesKey: compression,
             ]
         }
@@ -288,9 +288,18 @@ actor PostProcessor {
         videoInput.transform = try await videoTrack.load(.preferredTransform)
         writer.add(videoInput)
 
+        // **La réduction se fait au décodage.** Le décodeur matériel rend
+        // directement des images à la taille de sortie : l'encodeur n'a plus
+        // que le quart des pixels d'un écran ultra-large à traiter, d'où les
+        // 7,6× le temps réel mesurés contre 2,4× en pleine définition. Le
+        // format 420v est celui que l'encodeur HEVC consomme sans conversion.
         let videoOutput = AVAssetReaderTrackOutput(
             track: videoTrack,
-            outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                kCVPixelBufferWidthKey as String: encoding.width,
+                kCVPixelBufferHeightKey as String: encoding.height,
+            ]
         )
         reader.add(videoOutput)
 
@@ -302,7 +311,9 @@ actor PostProcessor {
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 48_000,
                 AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 128_000,
+                // De la voix : 96 kbit/s en stéréo ne s'entend pas différemment
+                // de 128, et c'est 7 Mo de moins par demi-heure.
+                AVEncoderBitRateKey: 96_000,
             ])
             input.expectsMediaDataInRealTime = false
             writer.add(input)

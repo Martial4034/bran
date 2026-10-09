@@ -58,6 +58,12 @@ struct RecordingBar: View {
             recalibrateTimer()
         }
         .onChange(of: model.isPaused) { recalibrateTimer() }
+        // Depuis la 0.1.19, la barre reste montée entre deux réunions : on
+        // démarre la suivante depuis la barre de traitement de la précédente.
+        // `onAppear` ne rejoue donc plus, et le chrono repartait de l'heure de
+        // départ de la réunion d'avant — « 1:40:00 » au démarrage du second
+        // closing du 09/10/2026. Chaque nouvelle session recale le chrono.
+        .onChange(of: model.recordingStartedAt) { recalibrateTimer() }
     }
 
     // MARK: - Lequel des deux visages
