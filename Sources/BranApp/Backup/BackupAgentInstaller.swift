@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import os
+import Security
 
 /// Installe, met à jour et retire le `LaunchAgent` qui déclenche
 /// `BackupHeadlessRun` — la seule façon pour la sauvegarde de tourner
@@ -147,7 +148,7 @@ enum BackupAgentInstaller {
         let logDirectory = BackupJournal.directory
         try FileManager.default.createDirectory(
             at: logDirectory, withIntermediateDirectories: true)
-        let plist: [String: Any] = [
+        var plist: [String: Any] = [
             "Label": label,
             // Le binaire réel de **cette** installation — jamais un chemin
             // littéral : bran s'installe aussi bien dans `/Applications`
@@ -179,6 +180,24 @@ enum BackupAgentInstaller {
             "StandardOutPath": logDirectory.appending(path: "launchd.out.log").path(percentEncoded: false),
             "StandardErrorPath": logDirectory.appending(path: "launchd.err.log").path(percentEncoded: false),
         ]
+        // **L'empreinte du binaire, pour que chaque mise à jour recharge le
+        // job.** `launchd` épingle au chargement une contrainte de lancement
+        // (« LWCR ») sur la signature du binaire. bran est signé sans Team ID,
+        // donc l'épingle porte sur l'empreinte exacte : la mise à jour suivante
+        // la change, et macOS tue chaque lancement du job — « Launch
+        // Constraint Violation », un rapport de plantage « bran » toutes les
+        // heures, et plus aucune sauvegarde. Vu après la 0.1.19 (08/10/2026,
+        // 20:14) et la 0.1.20 (09/10, 16:44).
+        //
+        // Le plist, lui, ne changeait pas d'un octet : `install()` concluait
+        // `alreadyCurrent` et ne rechargeait jamais. Y porter l'empreinte le
+        // rend différent à chaque binaire, donc rechargé — et seul un
+        // rechargement recalcule la contrainte. Remplacer le bundle a déjà tué
+        // toute sauvegarde en cours de l'ancienne version : ce rechargement ne
+        // coupe rien de plus.
+        if let codeHash = runningCodeHash {
+            plist["EnvironmentVariables"] = ["BRAN_CODE_HASH": codeHash]
+        }
 
         let data: Data
         do {
@@ -242,6 +261,22 @@ enum BackupAgentInstaller {
             )
         }
         return VerificationResult(isLoaded: result.status == 0, rawOutput: result.output)
+    }
+
+    /// L'empreinte (cdhash) du binaire en cours d'exécution, en hexadécimal.
+    /// `nil` si la signature est illisible — le plist reste alors celui
+    /// d'avant, sans empreinte, plutôt que de ne pas s'installer du tout.
+    static var runningCodeHash: String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, [], &info) == errSecSuccess,
+              let dictionary = info as? [String: Any],
+              let unique = dictionary[kSecCodeInfoUnique as String] as? Data
+        else { return nil }
+        return unique.map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Le plist
